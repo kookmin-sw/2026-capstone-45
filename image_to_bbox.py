@@ -5,19 +5,19 @@ import os
 import sys
 import numpy as np
 
-# Global Constants
 BBOX_COLOR_HUE_INCREMENT = 20
 BBOX_INPUT_FILE = "template.jpg"
 BBOX_OUTPUT_FILE = "bbox.json"
 
-# Global State Variables
-bboxes = [] # Stored in ORIGINAL image coordinates
+# Stored as normalized YOLO format [center_x, center_y, width, height] from 0.0 to 1.0
+bboxes = []
 drawing = False
-ix, iy = -1, -1 # Stored in ORIGINAL image coordinates
+nix, niy = -1.0, -1.0
 img_original = None
 img = None
 img_display = None
 zoom_level = 1.0
+
 
 def get_color(index):
     """
@@ -28,14 +28,26 @@ def get_color(index):
     r, g, b = colorsys.hsv_to_rgb(hue_deg / 360.0, 1.0, 1.0)
     return (int(b * 255), int(g * 255), int(r * 255))
 
+
 def draw_all_bboxes(canvas):
-    """Redraws all committed bounding boxes on the canvas, scaled to current zoom."""
-    for i, (x1, y1, x2, y2) in enumerate(bboxes):
+    """Redraws all committed bounding boxes using YOLO normalized coordinates."""
+    h_disp, w_disp = canvas.shape[:2]
+    
+    for i, (cx, cy, nw, nh) in enumerate(bboxes):
         color = get_color(i)
-        # Scale the original coordinates to the current zoom level for display
-        zx1, zy1 = int(x1 * zoom_level), int(y1 * zoom_level)
-        zx2, zy2 = int(x2 * zoom_level), int(y2 * zoom_level)
-        cv2.rectangle(canvas, (zx1, zy1), (zx2, zy2), color, 2)
+        
+        # Convert YOLO center coordinates back to top-left for OpenCV drawing
+        nx = cx - (nw / 2.0)
+        ny = cy - (nh / 2.0)
+        
+        # Scale the normalized coordinates to the current display size
+        x1 = int(nx * w_disp)
+        y1 = int(ny * h_disp)
+        x2 = int((nx + nw) * w_disp)
+        y2 = int((ny + nh) * h_disp)
+        
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
+
 
 def update_zoom():
     """Resizes the base image according to zoom_level and updates the display."""
@@ -51,17 +63,21 @@ def update_zoom():
     # Print current zoom state
     print(f"[INFO] Zoom level: {zoom_level}x")
 
-def mouse_callback(event, x, y, flags, param):
-    """Handles mouse events for drawing bounding boxes."""
-    global drawing, ix, iy, img_display, img
 
-    # Map the mouse coordinates back to the original image dimensions
-    orig_x = int(x / zoom_level)
-    orig_y = int(y / zoom_level)
+def mouse_callback(event, x, y, flags, param):
+    """Handles mouse events and normalizes coordinates immediately."""
+    global drawing, nix, niy, img_display, img
+
+    h_disp, w_disp = img.shape[:2]
+    
+    # Immediately convert display x,y to normalized 0.0-1.0 coordinates
+    # np.clip ensures boxes don't break if you drag the mouse outside the window
+    nx = np.clip(x / float(w_disp), 0.0, 1.0)
+    ny = np.clip(y / float(h_disp), 0.0, 1.0)
 
     if event == cv2.EVENT_LBUTTONDOWN:
         drawing = True
-        ix, iy = orig_x, orig_y
+        nix, niy = nx, ny
 
     elif event == cv2.EVENT_MOUSEMOVE:
         if drawing:
@@ -70,41 +86,35 @@ def mouse_callback(event, x, y, flags, param):
             
             # Preview the current bounding box being drawn
             color = get_color(len(bboxes))
-            zx1, zy1 = int(ix * zoom_level), int(iy * zoom_level)
-            cv2.rectangle(img_display, (zx1, zy1), (x, y), color, 2)
+            start_x, start_y = int(nix * w_disp), int(niy * h_disp)
+            cv2.rectangle(img_display, (start_x, start_y), (x, y), color, 2)
 
     elif event == cv2.EVENT_LBUTTONUP:
         if drawing:
             drawing = False
-            # Only append if it's an actual box
-            if orig_x != ix and orig_y != iy:
-                bboxes.append((ix, iy, orig_x, orig_y))
+            # Only append if it's an actual box and not a static click
+            if nx != nix and ny != niy:
+                xmin = min(nix, nx)
+                ymin = min(niy, ny)
+                nw = abs(nx - nix)
+                nh = abs(ny - niy)
+                
+                # Convert to YOLO format (center x, center y)
+                cx = xmin + (nw / 2.0)
+                cy = ymin + (nh / 2.0)
+                
+                bboxes.append([cx, cy, nw, nh])
             
             img_display = img.copy()
             draw_all_bboxes(img_display)
 
-def save_bboxes():
-    """Calculates normalized top-left xywh coordinates and saves to JSON."""
-    # Use the original image dimensions for accurate normalization
-    h_img, w_img = img_original.shape[:2]
-    normalized_bboxes = []
-    
-    for (x1, y1, x2, y2) in bboxes:
-        xmin = min(x1, x2)
-        xmax = max(x1, x2)
-        ymin = min(y1, y2)
-        ymax = max(y1, y2)
 
-        nx = xmin / w_img
-        ny = ymin / h_img
-        nw = (xmax - xmin) / w_img
-        nh = (ymax - ymin) / h_img
-        
-        normalized_bboxes.append([nx, ny, nw, nh])
-        
+def save_bboxes():
+    """Saves the pre-normalized bboxes directly to JSON."""
     with open(BBOX_OUTPUT_FILE, 'w') as f:
-        json.dump(normalized_bboxes, f, indent=4)
-    print(f"\n[INFO] Saved {len(normalized_bboxes)} bounding boxes to '{BBOX_OUTPUT_FILE}'.")
+        json.dump(bboxes, f, indent=4)
+    print(f"\n[INFO] Saved {len(bboxes)} bounding boxes to '{BBOX_OUTPUT_FILE}'.")
+
 
 def main():
     global img_original, img, img_display, zoom_level
@@ -126,8 +136,8 @@ def main():
 
     print("--- Controls ---")
     print(" Mouse: Click and drag to draw a bounding box")
-    print("   '[': Zoom in (Increase zoom by 0.1x)")
-    print("   ']': Zoom out (Decrease zoom by 0.1x)")
+    print("   '[': Zoom out (Decrease zoom by 0.1x)")
+    print("   ']': Zoom in (Increase zoom by 0.1x)")
     print("   'u': Undo the last drawn bounding box")
     print("   'q': Save to JSON and quit")
     print("----------------")
@@ -152,6 +162,7 @@ def main():
             update_zoom()
 
     cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()
