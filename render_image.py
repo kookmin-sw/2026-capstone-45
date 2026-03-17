@@ -1,20 +1,22 @@
+import argparse
 import os
 import json
 import skia
 from PIL import Image, ImageDraw
 
-INPUT_IMAGE_PATH = "template.png"
-OUTPUT_IMAGE_PATH = "template_rendered.png"
+DEFAULT_INPUT_IMAGE_PATH = "data/financial/erased.png"
+DEFAULT_OUTPUT_IMAGE_PATH = "rendered.png"
+DEFAULT_TEXT = "Rendering test\n렌더링 테스트\n✅"
 
 COLOR_PRIOR = "green"
-COLOR_SELECTED = "orange"
+COLOR_SELECTED = "blue"
 COLOR_NEXT = "red"
 COLOR_DEFAULT = "red"
 
-LINE_WIDTH = 3
+LINE_WIDTH = 1
 
 # CSS-like ordered font stack
-FONT_FAMILIES = ["Noto Serif CJK KR", "Georgia", "serif"]
+FONT_FAMILIES = ["Noto Sans CJK KR", "Arial", "sans-serif"]
 
 # Use the hex equivalent of skia.ColorBLACK to prevent IDE unresolved warnings
 COLOR_TEXT_SKIA = skia.ColorBLACK
@@ -52,34 +54,39 @@ def render_text(image: Image.Image, bbox: list[float], text: str) -> Image.Image
         builder.addText(text_content)
 
         paragraph = builder.Build()
-        paragraph.layout(100000.0)
         return paragraph
 
-    # 1. Measure at an arbitrary reference size
-    ref_size = 100.0
-    ref_paragraph = create_paragraph(text, ref_size)
-    ref_height = ref_paragraph.Height
+    min_size = 1.0
+    max_size = float(max(box_width, box_height))
+    best_size = min_size
+    final_paragraph = None
 
-    # 2. Mathematically exact scale factor
-    scale_factor = box_height / ref_height
-    final_font_size = ref_size * scale_factor
+    for _ in range(100):
+        mid_size = (min_size + max_size) / 2
+        para = create_paragraph(text, mid_size)
 
-    # 3. Create the final shaped paragraph
-    final_paragraph = create_paragraph(text, final_font_size)
+        para.layout(box_width)
 
-    # 4. Setup Skia Surface
+        if para.Height <= box_height and para.MinIntrinsicWidth <= box_width:
+            best_size = mid_size
+            min_size = mid_size
+            final_paragraph = para
+        else:
+            max_size = mid_size
+
+    if final_paragraph is None:
+        final_paragraph = create_paragraph(text, best_size)
+        final_paragraph.layout(box_width)
+
     surface = skia.Surface.MakeRasterN32Premul(box_width, box_height)
     canvas = surface.getCanvas()
 
-    # 5. Handle Native Clipping
     if not OVERFLOW_VISIBLE:
         clip_rect = skia.Rect.MakeWH(box_width, box_height)
         canvas.clipRect(clip_rect, skia.ClipOp.kIntersect, True)
 
-    # 6. Draw Text
     final_paragraph.paint(canvas, 0, 0)
 
-    # 7. Convert Skia Surface back to PIL Image and paste
     snapshot = surface.makeImageSnapshot()
     image_array = snapshot.toarray(
         colorType=skia.ColorType.kRGBA_8888_ColorType,
@@ -91,12 +98,11 @@ def render_text(image: Image.Image, bbox: list[float], text: str) -> Image.Image
 
     return image
 
-def render_image(bboxes: list[list[float]], selected: int | None) -> Image.Image:
-    if not os.path.exists(INPUT_IMAGE_PATH):
-        print(f"Error: The input image '{INPUT_IMAGE_PATH}' does not exist.")
-        raise FileNotFoundError(f"Input image not found: {INPUT_IMAGE_PATH}")
 
-    img = Image.open(INPUT_IMAGE_PATH).convert("RGBA")
+def render_image(
+    bboxes: list[list[float]], selected: int | None, input_image: Image.Image
+) -> Image.Image:
+    img = input_image.convert("RGBA")
         
     draw = ImageDraw.Draw(img)
     img_width, img_height = img.size
@@ -133,22 +139,35 @@ def render_image(bboxes: list[list[float]], selected: int | None) -> Image.Image
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-i", "--input", default=DEFAULT_INPUT_IMAGE_PATH)
+    parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT_IMAGE_PATH)
+    parser.add_argument("-t", "--text", default=DEFAULT_TEXT)
+    parser.add_argument("-n", "--nth-bbox", type=int, default=None)
+
+    args = parser.parse_args()
+
+    if args.text == DEFAULT_TEXT and args.nth_bbox is None:
+        args.nth_bbox = 1
+    if args.text and args.nth_bbox is None:
+        parser.error("-n/--nth-bbox must be provided if text is provided.")
+
     with open("bbox.json", "rb") as f:
         bboxes = json.load(f)
 
-    selected_index = 2
+    if not os.path.exists(args.input):
+        print(f"Error: The input image '{args.input}' does not exist.")
+        raise FileNotFoundError(f"Input image not found: {args.input}")
 
-    # Render the image borders
-    result_image = render_image(bboxes, selected_index)
+    base_image = Image.open(args.input)
 
-    # Example: Render text into the selected bounding box
-    if len(bboxes) > selected_index:
-        sample_text = "좋아요\n✅"
-        result_image = render_text(result_image, bboxes[selected_index], sample_text)
+    result_image = render_image(bboxes, args.nth_bbox, base_image)
 
-    # Save the result
-    result_image.save(OUTPUT_IMAGE_PATH)
-    print(f"Image successfully rendered and saved to {OUTPUT_IMAGE_PATH}")
+    if args.text and args.nth_bbox is not None and len(bboxes) > args.nth_bbox:
+        result_image = render_text(result_image, bboxes[args.nth_bbox], args.text)
+
+    result_image.save(args.output)
+    print(f"Image successfully rendered and saved to {args.output}")
 
 
 if __name__ == "__main__":
