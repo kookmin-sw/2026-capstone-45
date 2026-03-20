@@ -95,6 +95,9 @@ def fill_single_box(
         ],
     )
 
+    with open(f"debug_prompt_{index}.txt", "wt", encoding="utf-8") as f:
+        f.write(prompt_preamble)
+
     with open(f"debug_response_{index}.json", "wt", encoding="utf-8") as f:
         f.write(response.model_dump_json(indent=2))
 
@@ -114,8 +117,9 @@ def fill_single_box(
 def fill_document():
     client = OpenAI(base_url=os.environ["OPENAI_BASE_URL"])
 
-    with open("data/financial/bbox.json", "rb") as f:
-        bboxes: list[list[float]] = json.load(f)
+    with open("data/financial/layout.json", "rb") as f:
+        data = json.load(f)
+        bboxes: list[list[float]] = [x["bbox"] for x in data["pages"][0]["blocks"]]
 
     with open("data/financial/target.txt", "rt", encoding="utf-8") as f:
         desired_content = f.read()
@@ -128,6 +132,9 @@ def fill_document():
 
         img_rendered = Image.open("data/financial/erased.png").convert("RGBA")
         img_rendered = render_boxes(img_rendered, bboxes, texts, selected=curr_bbox_idx)
+
+        img_template.save(f"debug_template_{curr_bbox_idx}.png")
+        img_rendered.save(f"debug_rendered_{curr_bbox_idx}.png")
 
         text = fill_single_box(
             client, curr_bbox_idx, img_template, img_rendered, desired_content
