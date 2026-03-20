@@ -1,11 +1,11 @@
+from io import BytesIO
 import os
 import json
 import base64
 from PIL import Image
 from openai import OpenAI
-from dotenv import load_dotenv
 
-from render_image import render_image, render_text
+from .render_image import render_boxes
 
 prompt_preamble = """
 You are an automated document writer.
@@ -40,15 +40,31 @@ Below is the input.
 """.strip()
 
 
-def fill_single_box(client: OpenAI, index: int):
-    with open("data/financial/template.png", "rb") as f:
-        image_a = base64.b64encode(f.read()).decode("ascii")
+def image_as_data_uri(img: Image.Image) -> str:
+    buf = BytesIO()
+    img.save(buf, "png")
 
-    with open("data/financial/rendered.png", "rb") as f:
-        image_b = base64.b64encode(f.read()).decode("ascii")
+    buf.seek(0)
 
-    with open("data/financial/target.txt", "rt", encoding="utf-8") as f:
-        desired_content = f.read()
+    output = BytesIO(b"data:image/png;base64,")
+    output.seek(0, 2)
+    base64.encode(buf, output)
+
+    return output.getvalue().decode()
+
+
+def fill_single_box(
+    client: OpenAI,
+    index: int,
+    template: Image.Image,
+    rendered: Image.Image,
+    desired_content: str,
+):
+    # Reference document with boxes
+    image_a = image_as_data_uri(template)
+
+    # The screenshot of document currently being written
+    image_b = image_as_data_uri(rendered)
 
     response = client.responses.create(
         model=os.environ["OPENAI_MODEL"],
@@ -63,12 +79,12 @@ def fill_single_box(client: OpenAI, index: int):
                     },
                     {
                         "type": "input_image",
-                        "image_url": f"data:image/png;base64,{image_a}",
+                        "image_url": image_a,
                     },
                     {"type": "input_text", "text": "\n\n[Target document]"},
                     {
                         "type": "input_image",
-                        "image_url": f"data:image/png;base64,{image_b}",
+                        "image_url": image_b,
                     },
                     {
                         "type": "input_text",
@@ -101,35 +117,23 @@ def fill_document():
     with open("data/financial/bbox.json", "rb") as f:
         bboxes: list[list[float]] = json.load(f)
 
-    texts = ["" for _ in bboxes]
+    with open("data/financial/target.txt", "rt", encoding="utf-8") as f:
+        desired_content = f.read()
+
+    texts: list[str | None] = [None for _ in bboxes]
 
     for curr_bbox_idx in range(len(bboxes)):
-        img = Image.open("data/financial/original.png").convert("RGBA")
-        img = render_image(bboxes, curr_bbox_idx, img)
-        img.save("data/financial/template.png")
+        img_template = Image.open("data/financial/original.png").convert("RGBA")
+        img_template = render_boxes(img_template, bboxes, selected=curr_bbox_idx)
 
-        img = Image.open("data/financial/erased.png").convert("RGBA")
-        img = render_image(bboxes, curr_bbox_idx, img)
-        for bbox, text in zip(bboxes, texts):
-            if len(text) != 0:
-                img = render_text(img, bbox, text)
-        img.save("data/financial/rendered.png")
+        img_rendered = Image.open("data/financial/erased.png").convert("RGBA")
+        img_rendered = render_boxes(img_rendered, bboxes, texts, selected=curr_bbox_idx)
 
-        text = fill_single_box(client, curr_bbox_idx)
+        text = fill_single_box(
+            client, curr_bbox_idx, img_template, img_rendered, desired_content
+        )
         texts[curr_bbox_idx] = text
 
-    img = Image.open("data/financial/erased.png").convert("RGBA")
-    for bbox, text in zip(bboxes, texts):
-        if len(text) != 0:
-            img = render_text(img, bbox, text)
-    img.save("data/financial/final.png")
-
-
-def main():
-    load_dotenv()
-
-    fill_document()
-
-
-if __name__ == "__main__":
-    main()
+    img_rendered = Image.open("data/financial/erased.png").convert("RGBA")
+    img_rendered = render_boxes(img_rendered, bboxes, texts)
+    img_template.save("data/financial/final.png")
