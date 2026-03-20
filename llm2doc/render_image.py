@@ -53,6 +53,7 @@ def render_single_text(image: Image.Image, bbox: list[float], text: str) -> Imag
     best_size = min_size
     final_paragraph = None
 
+    # 바이너리 서치
     for _ in range(100):
         mid_size = (min_size + max_size) / 2
         para = create_paragraph(text, mid_size)

@@ -12,11 +12,11 @@ You are an automated document writer.
 
 You will be given with:
 - Reference document
-  This is the desired *layout* of the document. Follow overall shape and layout of this document.
+  This is the desired *layout* of the document. Follow overall style and layout of this document.
 - Target document
   This is the document you're currently writing.
 - Desired content
-  This is the content you need to write.
+  This is the *content* you need to write.
 
 There will be boxes in the document screenshots. Green boxes represent ones you've already written. Blue box represent what you need to write *right now*. Red boxes represent ones you'll be writing *later*. Box is drawn onto both reference document and target document. So compare those two strategically to find out which content should go into the blue box.
 
@@ -75,13 +75,13 @@ def fill_single_box(
                     {"type": "input_text", "text": prompt_preamble},
                     {
                         "type": "input_text",
-                        "text": "\n\n[Reference document]",
+                        "text": "\n\n[Reference document]\n",
                     },
                     {
                         "type": "input_image",
                         "image_url": image_a,
                     },
-                    {"type": "input_text", "text": "\n\n[Target document]"},
+                    {"type": "input_text", "text": "\n\n[Target document]\n"},
                     {
                         "type": "input_image",
                         "image_url": image_b,
