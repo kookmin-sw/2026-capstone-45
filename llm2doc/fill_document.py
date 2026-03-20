@@ -143,4 +143,4 @@ def fill_document():
 
     img_rendered = Image.open("data/financial/erased.png").convert("RGBA")
     img_rendered = render_boxes(img_rendered, bboxes, texts)
-    img_template.save("data/financial/final.png")
+    img_rendered.save("data/financial/final.png")
