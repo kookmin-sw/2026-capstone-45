@@ -1,18 +1,26 @@
-from PIL import Image
-from surya.foundation import FoundationPredictor
-from surya.recognition import RecognitionPredictor
-from surya.detection import DetectionPredictor
+import numpy as np
+
+from PIL import Image, ImageDraw
 
 
 def analyze_layout(img: Image.Image):
-    img = img.convert("RGB")
-    foundation_predictor = FoundationPredictor()
-    recognition_predictor = RecognitionPredictor(foundation_predictor)
-    detection_predictor = DetectionPredictor()
+    from paddleocr import LayoutDetection
 
-    predictions = recognition_predictor([img], det_predictor=detection_predictor)
+    img_arr = np.asarray(img.convert("RGB"))[..., ::-1].copy()
 
-    print(predictions)
+    # Use PP-DocLayoutV2 to get reading order
+    model = LayoutDetection(
+        model_name="PP-DocLayout_plus-L",
+        layout_nms=True,
+        threshold=0.5,
+        layout_merge_bboxes_mode="large",
+    )
+
+    output = model.predict(img_arr)
+
+    for res in output:
+        res.print()
+        res.save_to_img(save_path="./debug")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 # Project specific files
 /debug_*
+/debug
 /*.json
 /*.jpg
 /*.png
