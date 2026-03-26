@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "numpy>=2.4.3",
+    "numpy<2.4",  # https://github.com/PaddlePaddle/PaddleOCR/issues/17597
     "openai>=2.28.0",
     "paddleocr[all]==3.4.0",
     "paddlepaddle==3.3.0; sys_platform != 'linux' and sys_platform != 'win32'",
@@ -16,6 +16,7 @@ dependencies = [
     "skia-python>=144.0.post1",
     "nvidia-cublas-cu12; sys_platform == 'win32'",
     "nvidia-cudnn-cu12; sys_platform == 'win32'",
+    "beartype>=0.22.9",
 ]
 
 [tool.uv.sources]
