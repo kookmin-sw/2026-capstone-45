@@ -29,9 +29,10 @@ Use the language of target document, unless the user query says otherwise.
   * If the target block is a continuous text paragraph, write a continuous text paragraph.
   * If the target is a bulleted list, write a bulleted list.
   * If the source is a paragraph but the target is a table, you must extract the data into a table.
+  * Match the tone (말투) of the target block. For instance, do not modify "-음." into "-입니다." or vise versa.
 * The goal is to fill the same amount of 'real estate' on each block. Use the target as a template for length, but don't feel obligated to hit an exact line count if the flow is better slightly shorter or longer.
 * Match the logical progression and rhetorical purpose of the target document. Keep the argument structure (e.g., Claim -> Evidence -> Summary) of the target.
-* Because both source and target is processed with OCR, it may contain typos or inconsistent line breaks. Try to mitigate them.
+* Because both source and target are processed with OCR, it may contain typos or inconsistent line breaks. Try to mitigate them.
 
 # Input format
 The user query decides what the user wants.
