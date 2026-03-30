@@ -1,0 +1,295 @@
+import os
+import re
+from PIL import Image
+from openai import OpenAI
+from beartype import beartype
+from bs4 import BeautifulSoup
+
+from .analyze_layout import LayoutAnalyzer, ParsedDocument
+from .render_image import render_boxes, erase_bounding_box
+from .util import image_as_data_uri
+
+
+PROMPT_WRITE = """
+You are an automated document writer.
+
+# Task
+You will be given a user query, a set of source documents, and a target document.
+
+You have to write in the style and layout of the target document, but with materials from the source documents, respecting the user query.
+In other words, keep the positions (divs) and structure of the target, but populate with source content.
+You should follow the narrative flow of the target document.
+
+Depending on the user query and/or style and layout of the target document, some of these source documents might be useless.
+Use the language of target document, unless the user query says otherwise.
+
+## Tips
+* Strictly preserve the micro-formatting of the target block you are filling.
+  * Examples:
+  * If the target block is a continuous text paragraph, write a continuous text paragraph.
+  * If the target is a bulleted list, write a bulleted list.
+  * If the source is a paragraph but the target is a table, you must extract the data into a table.
+  * Match the tone (말투) of the target block. For instance, do not modify "-음." into "-입니다." or vise versa.
+* The goal is to fill the same amount of 'real estate' on each block. Use the target as a template for length, but don't feel obligated to hit an exact line count if the flow is better slightly shorter or longer.
+* Match the logical progression and rhetorical purpose of the target document. Keep the argument structure (e.g., Claim -> Evidence -> Summary) of the target.
+* Because both source and target are processed with OCR, it may contain typos or inconsistent line breaks. Try to mitigate them.
+
+# Input format
+The user query decides what the user wants.
+This can be vague, and if so, you need to figure out what to write given the documents.
+
+*Source* documents are what the user gave us as the source materials. Each source document will have a unique identifier (e.g., id="1").
+You need to decide if each source documents are relevant to the user query individually.
+
+# Output format
+Write the new document as a single HTML-ish document, in same style and layout of *target* document.
+You may reuse images present in any (source or target) document.
+Wrap the output in <document>...</document> tag just like the target document.
+The attribute `id` on div will be used to map them.
+You can omit an div if you want to reuse what's in the source document.
+Reusing is resource-friendly, so try to reuse blocks whenever possible (as long as it doesn't affect the task).
+
+Do not add any filler text, or they will be treated as part of the document you wrote.
+
+# Actual input
+Now this is the end of the guide.
+Here is the actual input. Each input is wrapped inside <document>...</document> tag.
+
+Each div block is positioned on the page via attribute `data-bbox`. It has format of [xmin, ymin, xmax, ymax] in 0-1000 relative scale. Each page has independent coordinates.
+
+## Stylesheet
+While the text below is not a complete HTML document (and should be not treated as such), here is the basic stylesheet for the document.
+
+```css
+document > page > div {{
+  position: absolute;  /* Position is derived from the attribute `data-bbox` */
+}}
+
+document > page > div > p {{
+  white-space: pre-wrap;
+}}
+```
+
+## User query
+<query>
+{query}
+</query>
+
+## Source documents
+{sources}
+
+## Target document
+{target}
+"""
+
+REGEX_NEWLINE = re.compile(r"[\r\n]+")
+REGEX_DIV_ID = re.compile(r"^page-([0-9]+)-block-([0-9]+)$")
+
+
+@beartype
+def document_to_html(doc: ParsedDocument, doc_id: int | None = None) -> str:
+    result = []
+
+    if doc_id is None:
+        result.append("<document>\n")
+    else:
+        result.append(f'<document id="{doc_id}">\n')
+
+    for i, page in enumerate(doc.pages):
+        result.append(f'  <page id="page-{i + 1}">\n')
+
+        for j, block in enumerate(page.blocks):
+            bbox = [
+                block.bbox[0] * 1000 // page.width,
+                block.bbox[1] * 1000 // page.height,
+                block.bbox[2] * 1000 // page.width,
+                block.bbox[3] * 1000 // page.height,
+            ]
+            bbox_str = ", ".join([str(x) for x in bbox])
+
+            result.append(
+                f'    <div id="page-{i + 1}-block-{j + 1}" data-bbox="[{bbox_str}]">\n'
+            )
+
+            if block.is_text:
+                for line in REGEX_NEWLINE.split(block.content.strip()):
+                    result.append("      <p>")
+                    result.append(
+                        line.replace("&", "&amp;")
+                        .replace("<", "&lt;")
+                        .replace(">", "&gt;")
+                    )
+                    result.append("</p>\n")
+            elif block.is_image:
+                result.append(f'      <img src="/page-{i + 1}/block-{j + 1}/image">\n')
+            elif block.is_html:
+                result.append("      ")
+                result.append(block.content)
+                result.append("\n")
+            else:
+                print("[WARN] Block has no is_* directive")
+
+            result.append("    </div>\n")
+
+        result.append("  </page>\n")
+
+    result.append("</document>")
+
+    return "".join(result)
+
+
+@beartype
+def write_document(
+    client: OpenAI,
+    query: str,
+    src_docs: list[ParsedDocument],
+    target_doc: ParsedDocument,
+    target_doc_images: list[Image.Image],
+) -> str:
+    imagine_prompt = PROMPT_WRITE.strip().format(
+        query=query,
+        sources="\n\n".join(
+            [document_to_html(x, i + 1) for i, x in enumerate(src_docs)]
+        ),
+        target=document_to_html(target_doc),
+    )
+
+    with open("debug_write_input.txt", "wt", encoding="utf-8") as f:
+        f.write(imagine_prompt)
+
+    # not used for now (VRAM OOM)
+    screenshots = []
+    for i, img_page in enumerate(target_doc_images):
+        screenshots.append({"type": "input_text", "text": f"\n### Page {i + 1}\n"})
+        screenshots.append(
+            {"type": "input_image", "image_url": image_as_data_uri(img_page)}
+        )
+
+    response = client.responses.create(
+        model=os.environ["OPENAI_MODEL"],
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": imagine_prompt},
+                ],
+            }
+        ],
+    )
+
+    with open("debug_write_output.txt", "wt", encoding="utf-8") as f:
+        f.write(response.output_text)
+
+    if any((x.type == "reasoning" for x in response.output)):
+        with open("debug_write_reason.txt", "wt", encoding="utf-8") as f:
+            for output in response.output:
+                if output.type == "reasoning":
+                    f.write(output.content[0].text)
+
+    return response.output_text
+
+
+@beartype
+def create_document(query: str | None, src_docs: list[str], target_doc: str):
+    if query is None:
+        query = "적당히 알아서 작성해줘."
+
+    # 필요한 파일들이 존재하는지 확인
+    datas = os.listdir("data")
+
+    for src_doc in src_docs:
+        if src_doc not in datas:
+            raise FileNotFoundError(f"source document data/{src_doc} does not exist")
+
+    if target_doc not in datas:
+        raise FileNotFoundError(f"target document data/{target_doc} does not exist")
+
+    # 문서 불러와서 파싱
+    layout_analyzer = LayoutAnalyzer()
+
+    src_docs_parsed = []
+
+    for src_doc in src_docs:
+        document = layout_analyzer(src_doc)
+        src_docs_parsed.append(document)
+
+    target_doc_parsed = layout_analyzer(target_doc)
+
+    layout_analyzer.dispose()
+    del layout_analyzer
+
+    # LLM에게 문서를 작성시킴
+    client = OpenAI(base_url=os.environ["OPENAI_BASE_URL"])
+
+    target_doc_image_names = os.listdir(f"data/{target_doc}/")
+    target_doc_image_names.sort()
+    target_doc_images = [
+        Image.open(f"data/{target_doc}/{x}")
+        for x in target_doc_image_names
+        if x.startswith("original")
+    ]
+
+    imagine = write_document(
+        client, query, src_docs_parsed, target_doc_parsed, target_doc_images
+    )
+
+    # 작성한 문서를 렌더링함
+    bboxes = [[y.bbox for y in x.blocks] for x in target_doc_parsed.pages]
+    texts = [[None for _ in x.blocks] for x in target_doc_parsed.pages]
+
+    soup = BeautifulSoup(imagine.strip(), "lxml")
+    document = soup.find("document")
+    for i, page in enumerate(document.find_all("page", recursive=False)):
+        for j, block in enumerate(page.find_all("div", recursive=False)):
+            m = REGEX_DIV_ID.match(block.attrs["id"])
+            if m is None:
+                continue
+
+            block_page = int(m[1]) - 1
+            block_idx = int(m[2]) - 1
+
+            if len(texts) <= block_page or len(texts[block_page]) <= block_idx:
+                print(f"[WARN] Invalid div: {block}")
+                continue
+
+            if block.find("img") is not None:
+                print(f"[WARN] Ignoring div containing img: {block}")
+                continue
+
+            if block.find("table") is not None:
+                print(f"[WARN] Ignoring div containing table: {block}")
+                continue
+
+            texts[block_page][block_idx] = block.text.strip()
+
+    valid_bboxes = [
+        [b for b, t in zip(page_bboxes, page_texts) if t is not None]
+        for page_bboxes, page_texts in zip(bboxes, texts)
+    ]
+    valid_texts = [[t for t in page_texts if t is not None] for page_texts in texts]
+
+    for i, img in enumerate(target_doc_images):
+        img = img.copy()
+        for bbox in valid_bboxes[i]:
+            img = erase_bounding_box(img, bbox)
+
+        img = render_boxes(img, valid_bboxes[i], valid_texts[i])
+        img.save(f"debug_finish_{i + 1}.png")
+
+
+if __name__ == "__main__":
+    option = 2
+
+    if option == 0:
+        # KMC 레포트 (의도 자동 완성)
+        create_document(None, ["financial2"], "financial1")
+    elif option == 1:
+        create_document(
+            "KMC 기업 보고서 작성해", ["financial2", "financial3"], "financial1"
+        )
+    elif option == 2:
+        create_document(
+            "삼성전자 관련 데일리 브리핑 작성해 (시장 전체 말고 삼성전자만)",
+            ["blog1", "financial1", "financial3"],
+            "financial2",
+        )

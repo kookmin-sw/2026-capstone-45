@@ -1,13 +1,28 @@
-from io import BytesIO
 import os
-import json
-import base64
+from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 from openai import OpenAI
+from beartype import beartype
 
-from .render_image import render_boxes
+from .analyze_layout import LayoutAnalyzer
+from .render_image import render_boxes, erase_bounding_box
+from .util import image_as_data_uri
 
-prompt_preamble = """
+
+FILLABLE_BLOCKS = set(
+    [
+        "paragraph_title",
+        "text",
+        "doc_title",
+        "paragraph_title",
+        "vision_footnote",
+        # "table",
+        # "chart",
+    ]
+)
+
+
+FILL_PROMPT = """
 You are an automated document writer.
 
 You will be given with:
@@ -18,9 +33,19 @@ You will be given with:
 - Desired content
   This is the *content* you need to write.
 
-There will be boxes in the document screenshots. Green boxes represent ones you've already written. Blue box represent what you need to write *right now*. Red boxes represent ones you'll be writing *later*. Box is drawn onto both reference document and target document. So compare those two strategically to find out which content should go into the blue box.
+There will be striped bounding boxes in the document screenshots. To ensure they remain visible against any background color, these boxes are drawn with an alternating striped pattern (primary color, white, black, primary color). 
+- Green-striped boxes represent areas you've already written.
+- The blue-striped box represents what you need to write *right now*.
+- Red-striped boxes represent areas you'll be writing *later*.
 
-Your job is to read desired content, and fill in the blue box in the target document, keeping style and layout of reference document. This time, you only have to fill a single box.
+The boxes are drawn onto both the reference document and target document. Compare those two strategically to find out which content should go into the blue-striped box.
+
+Your job is to read the desired content, and fill in the blue-striped box in the target document, keeping the style and layout of the reference document. This time, you only have to fill a single box. Keep in mind that you may need to split content into multiple boxes, especially if boxes are split over multiple paragraphs or pages.
+
+Currently, the blue-striped box is at {blue_box_coords}, page_id={blue_box_page}.
+If uncertain on where the box is, refer to the coordinates instead of guessing.
+Coordinates is in format of [xmin, ymin, xmax, ymax] of 0-1000 relative scale.
+Because box is at same position for both reference and target document, they are at the exact same coordinates.
 
 **Output format**
 You write a single code block containing desired content. For instance, if you want to fill the blue box with lorem ipsum, write:
@@ -35,68 +60,82 @@ Lorem ipsum, dolar sit amet.
 - Empty lines matter. The font size will be adjusted to fit the box. If you want some margin, Write few blank lines.
 - Desired content contains the entire document worth of data. DO NOT attempt to fill all of it into a single box. You MUST find which content should go into the blue box.
 - Everything that follows "[Desired content]" *is* the desired content. Don't be confused even if it contains some header-looking text!
+- Even if you cannot visually locate the blue-striped box on the specified page_id, DO NOT look at other pages. You must blindly trust the provided coordinates to determine the location and size of the text you need to write.
 
 Below is the input.
 """.strip()
 
 
-def image_as_data_uri(img: Image.Image) -> str:
-    buf = BytesIO()
-    img.save(buf, "png")
-
-    buf.seek(0)
-
-    output = BytesIO(b"data:image/png;base64,")
-    output.seek(0, 2)
-    base64.encode(buf, output)
-
-    return output.getvalue().decode()
-
-
-def fill_single_box(
+@beartype
+def invoke_llm(
     client: OpenAI,
     index: int,
-    template: Image.Image,
-    rendered: Image.Image,
+    target: list[Image.Image],
+    rendered: list[Image.Image],
     desired_content: str,
+    blue_box_coords: list[int],
+    blue_box_page: int,
 ):
+    fill_prompt = FILL_PROMPT.format(
+        blue_box_coords=blue_box_coords, blue_box_page=blue_box_page
+    )
+
+    content = [
+        {
+            "type": "input_text",
+            "text": fill_prompt,
+        },
+    ]
+
     # Reference document with boxes
-    image_a = image_as_data_uri(template)
+    for i, img in enumerate(target):
+        content.extend(
+            [
+                {
+                    "type": "input_text",
+                    "text": f"\n\n[Reference document, page_id={i + 1}]\n",
+                },
+                {
+                    "type": "input_image",
+                    "image_url": image_as_data_uri(img),
+                },
+            ]
+        )
 
     # The screenshot of document currently being written
-    image_b = image_as_data_uri(rendered)
+    for i, img in enumerate(rendered):
+        content.extend(
+            [
+                {
+                    "type": "input_text",
+                    "text": f"\n\n[Target document, page_id={i + 1}]\n",
+                },
+                {
+                    "type": "input_image",
+                    "image_url": image_as_data_uri(img),
+                },
+            ]
+        )
+
+    content.append(
+        {
+            "type": "input_text",
+            "text": f"\n\n[Desired content]\n{desired_content}",
+        }
+    )
 
     response = client.responses.create(
         model=os.environ["OPENAI_MODEL"],
         input=[
             {
                 "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt_preamble},
-                    {
-                        "type": "input_text",
-                        "text": "\n\n[Reference document]\n",
-                    },
-                    {
-                        "type": "input_image",
-                        "image_url": image_a,
-                    },
-                    {"type": "input_text", "text": "\n\n[Target document]\n"},
-                    {
-                        "type": "input_image",
-                        "image_url": image_b,
-                    },
-                    {
-                        "type": "input_text",
-                        "text": f"\n\n[Desired content]\n{desired_content}",
-                    },
-                ],
+                "content": content,
             }
         ],
     )
 
     with open(f"debug_prompt_{index}.txt", "wt", encoding="utf-8") as f:
-        f.write(prompt_preamble)
+        f.write(fill_prompt)
 
     with open(f"debug_response_{index}.json", "wt", encoding="utf-8") as f:
         f.write(response.model_dump_json(indent=2))
@@ -114,33 +153,127 @@ def fill_single_box(
     return text
 
 
-def fill_document():
-    client = OpenAI(base_url=os.environ["OPENAI_BASE_URL"])
+def fill_single_box(
+    client: OpenAI,
+    desired_content: str,
+    page_blocks: list[list[list[int]]],
+    images: list[Image.Image],
+    erased_images: list[Image.Image],
+    page: int,
+    bbox_idx: int,
+    index: int,
+):
+    # Render boxes onto original image
+    target_imgs: list[Image.Image] = []
+    for i, blk in enumerate(page_blocks):
+        if page == i:
+            selected = bbox_idx
+        else:
+            selected = -1
 
-    with open("data/financial/layout.json", "rb") as f:
-        data = json.load(f)
-        bboxes: list[list[float]] = [x["bbox"] for x in data["pages"][0]["blocks"]]
+        img = images[page].copy()
+        img = render_boxes(img, blk, selected=selected)
+        target_imgs.append(img)
 
-    with open("data/financial/target.txt", "rt", encoding="utf-8") as f:
-        desired_content = f.read()
+    # Render boxes onto erased image
+    rendered_imgs: list[Image.Image] = []
+    for i, blk in enumerate(page_blocks):
+        if page == i:
+            selected = bbox_idx
+        else:
+            selected = -1
 
-    texts: list[str | None] = [None for _ in bboxes]
+        img = erased_images[i].copy()
+        img = render_boxes(img, blk, selected=selected)
+        rendered_imgs.append(img)
 
-    for curr_bbox_idx in range(len(bboxes)):
-        img_template = Image.open("data/financial/original.png").convert("RGBA")
-        img_template = render_boxes(img_template, bboxes, selected=curr_bbox_idx)
+    target_imgs[page].save(f"debug_target_{index}.png")
 
-        img_rendered = Image.open("data/financial/erased.png").convert("RGBA")
-        img_rendered = render_boxes(img_rendered, bboxes, texts, selected=curr_bbox_idx)
+    blue_box_coords = page_blocks[page][bbox_idx]
 
-        img_template.save(f"debug_template_{curr_bbox_idx}.png")
-        img_rendered.save(f"debug_rendered_{curr_bbox_idx}.png")
+    # Qwen VL format
+    width = images[page].width
+    height = images[page].height
+    blue_box_coords = [
+        blue_box_coords[0] * 1000 // width,
+        blue_box_coords[1] * 1000 // height,
+        blue_box_coords[2] * 1000 // width,
+        blue_box_coords[3] * 1000 // height,
+    ]
 
-        text = fill_single_box(
-            client, curr_bbox_idx, img_template, img_rendered, desired_content
-        )
-        texts[curr_bbox_idx] = text
+    text = invoke_llm(
+        client,
+        index,
+        target_imgs,
+        rendered_imgs,
+        desired_content,
+        blue_box_coords,
+        page + 1,
+    )
 
-    img_rendered = Image.open("data/financial/erased.png").convert("RGBA")
-    img_rendered = render_boxes(img_rendered, bboxes, texts)
-    img_rendered.save("data/financial/final.png")
+    return text
+
+
+@beartype
+def fill_document(
+    client: OpenAI,
+    desired_content: str,
+    target_doc: str,
+):
+    print("[WARN] This code should not be used")
+
+    layout_analyzer = LayoutAnalyzer()
+
+    target_layout = layout_analyzer(target_doc)
+
+    layout_analyzer.dispose()
+    del layout_analyzer
+
+    page_blocks = [
+        [block.bbox for block in page.blocks if block.label in FILLABLE_BLOCKS]
+        for page in target_layout.pages
+    ]
+
+    image_paths = [
+        x for x in os.listdir(f"data/{target_doc}") if x.startswith("original")
+    ]
+    image_paths.sort()
+    images = [Image.open(f"data/{target_doc}/{x}") for x in image_paths]
+
+    # Erase image
+    erased_images = []
+    for blk, img in zip(page_blocks, images):
+        img = img.copy()
+        for bbox in blk:
+            img = erase_bounding_box(img, bbox)
+        erased_images.append(img)
+
+    page_texts: list[list] = [[None for _ in page] for page in page_blocks]
+
+    with ThreadPoolExecutor() as exe:
+        cnt = 0
+
+        for i, blocks in enumerate(page_blocks):
+            for j, bbox in enumerate(blocks):
+                page_texts[i][j] = exe.submit(
+                    fill_single_box,
+                    client,
+                    desired_content,
+                    page_blocks,
+                    images,
+                    erased_images,
+                    i,
+                    j,
+                    cnt,
+                )
+
+                cnt += 1
+
+        for i, blocks in enumerate(page_blocks):
+            for j, bbox in enumerate(blocks):
+                page_texts[i][j] = page_texts[i][j].result()
+
+    for i, blk in enumerate(page_blocks):
+        img = erased_images[i].copy()
+        img = render_boxes(img, blk, page_texts[i], selected=None)
+        img.save(f"debug_final_{i}.png")
