@@ -10,11 +10,12 @@ from dataclasses import dataclass
 from typing import Any
 from beartype import beartype
 from PIL import Image
-from paddleocr import PaddleOCRVL
+from paddleocr import PaddleOCRVL, TextDetection
 from paddlex.inference.pipelines.paddleocr_vl.result import (
     PaddleOCRVLResult,
     PaddleOCRVLBlock,
 )
+from paddlex.inference.models.text_detection.result import TextDetResult
 
 from .util import validate_type
 
@@ -28,6 +29,7 @@ class BlockInfo:
     label: str
     content: str
     bbox: list[int]
+    line_height: float
     is_text: bool
     is_image: bool
     is_html: bool
@@ -147,12 +149,18 @@ class ParsedDocument:
 class LayoutAnalyzer:
     def __init__(self):
         self.pipeline: PaddleOCRVL | None = None
+        self.text_detector: TextDetection | None = None
 
     def load_model(self):
         # 데모 프로그램의 세팅을 그대로 이용
         self.pipeline = PaddleOCRVL(
             use_layout_detection=True,
             merge_layout_blocks=True,
+        )
+
+        self.ocr = TextDetection(
+            model_name="PP-OCRv5_server_det",
+            box_thresh=0.5,
         )
 
     @classmethod
@@ -202,6 +210,11 @@ class LayoutAnalyzer:
             [x.markdown for x in pages_output]
         )
 
+        # VRAM OOM 발생함
+        gc.collect()
+        if paddle.device.is_compiled_with_cuda() and paddle.device.cuda.device_count():
+            paddle.device.cuda.empty_cache()
+
         parsed_pages = []
 
         for i, output in enumerate(pages_output):
@@ -216,11 +229,18 @@ class LayoutAnalyzer:
                 is_html = block.label == "table"
                 is_text = not is_image and not is_html
 
+                line_height = self._estimate_line_height(
+                    pages_arrays[i],
+                    block.bbox,
+                    len(list(block.content.strip().split("\n"))) + 1,
+                )
+
                 blocks.append(
                     BlockInfo(
                         label=block.label,
                         content=block.content,
                         bbox=block.bbox,
+                        line_height=line_height,
                         is_text=is_text,
                         is_image=is_image,
                         is_html=is_html,
@@ -253,9 +273,40 @@ class LayoutAnalyzer:
 
     def dispose(self):
         self.pipeline = None
+        self.ocr = None
         gc.collect()
         if paddle.device.is_compiled_with_cuda() and paddle.device.cuda.device_count():
             paddle.device.cuda.empty_cache()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.dispose()
+
+    def _estimate_line_height(self, img: np.ndarray, bbox: list[int], lines: int):
+        assert self.ocr is not None
+
+        xmin, ymin, xmax, ymax = bbox
+        result = self.ocr.predict(img[ymin:ymax, xmin:xmax])[0]
+        result = validate_type(result, TextDetResult)
+
+        dt_polys = validate_type(result["dt_polys"], np.ndarray)
+        dt_scores = validate_type(result["dt_scores"], list[float])
+
+        if len(dt_polys) == 0:
+            # 글자 크기를 추정하지 못하면 박스 높이 반환
+            return (ymax - ymin) / lines
+
+        # TODO: AABB대신 폴리곤 그대로 높이 추정하기
+
+        xmin = np.min(dt_polys[:, :, 0], axis=1)
+        xmax = np.max(dt_polys[:, :, 0], axis=1)
+        ymin = np.min(dt_polys[:, :, 1], axis=1)
+        ymax = np.max(dt_polys[:, :, 1], axis=1)
+
+        line_height = np.median(ymax - ymin)
+        return float(line_height)
 
 
 def recreate_cache():

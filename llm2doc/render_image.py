@@ -2,11 +2,17 @@ import os
 import math
 import uuid
 import tempfile
+import threading
+import time
 import numpy as np
+import random
+import skia
+
 from PIL import Image, ImageDraw
 from beartype import beartype
-from typing import Sequence
+from typing import Sequence, cast
 from html2image import Html2Image
+from concurrent.futures import Future, ThreadPoolExecutor
 
 
 COLOR_PRIOR = "green"
@@ -15,44 +21,147 @@ COLOR_NEXT = "red"
 
 LINE_WIDTH = 2
 
+# CSS-like ordered font stack
+FONT_FAMILIES = ["Noto Sans CJK KR", "Arial", "sans-serif"]
+
+OVERFLOW_VISIBLE = False
+
+# Access textlayout directly through the skia module
+FONT_COLLECTION = skia.textlayout.FontCollection()
+FONT_COLLECTION.setDefaultFontManager(skia.FontMgr())
+UNICODE = skia.Unicodes.ICU.Make()
+
+# Thread-local storage to hold per-thread Html2Image instances
+thread_local = threading.local()
+
 
 def _create_html2image_instance():
     tempdir = tempfile.gettempdir()
+    tempdir = os.path.join(tempdir, uuid.uuid4().hex)
 
     try:
-        return Html2Image(browser="chrome", output_path=tempdir)
+        return Html2Image(
+            browser="chrome",
+            temp_path=tempdir,
+            output_path=tempdir,
+            disable_logging=True,
+        )
     except FileNotFoundError:
         pass
 
     try:
-        return Html2Image(browser="edge", output_path=tempdir)
+        return Html2Image(
+            browser="edge", temp_path=tempdir, output_path=tempdir, disable_logging=True
+        )
     except FileNotFoundError:
         pass
 
     raise RuntimeError("Could not find a suitable browser.")
 
 
-hti = _create_html2image_instance()
+def _init_thread():
+    """Initializes thread-local storage for the thread pool worker."""
+    thread_local.hti = _create_html2image_instance()
 
 
 @beartype
-def _render_single_html(
-    image: Image.Image, bbox: Sequence[int | float], html: str
+def render_single_text(
+    image: Image.Image,
+    bbox: Sequence[int | float],
+    text: str,
+    extend_bbox: bool = False,
 ) -> Image.Image:
-    bbox = _extend_bounding_box(image, bbox)
-    x_min, y_min, x_max, y_max = bbox
+    if extend_bbox:
+        bbox = _extend_bounding_box(image, bbox)
 
-    box_width = int(x_max - x_min)
-    box_height = int(y_max - y_min)
+    x_min, y_min, x_max, y_max = map(int, bbox)
 
-    if box_width <= 0 or box_height <= 0:
-        return image
-
-    image = image.convert("RGB")
-
-    img_arr = np.array(image)
+    img_arr = np.asarray(image.convert("RGB"))
     bg_color = np.median(img_arr[y_min:y_max, x_min:x_max], axis=(0, 1))
-    bg_color = "".join([f"{int(x):02x}" for x in bg_color])
+    if np.mean(bg_color) < 127:
+        text_color = skia.ColorWHITE
+    else:
+        text_color = skia.ColorBLACK
+
+    abs_width = x_max - x_min
+    abs_height = y_max - y_min
+
+    box_width = int(abs_width)
+    box_height = int(abs_height)
+
+    def create_paragraph(
+        text_content: str, font_size: float
+    ) -> skia.textlayout.Paragraph:
+        para_style = skia.textlayout.ParagraphStyle()
+        text_style = skia.textlayout.TextStyle()
+        text_style.setColor(text_color)
+        text_style.setFontSize(font_size)
+        text_style.setFontFamilies(FONT_FAMILIES)
+
+        builder = skia.textlayout.ParagraphBuilder(para_style, FONT_COLLECTION, UNICODE)
+        builder.pushStyle(text_style)
+        builder.addText(text_content)
+
+        paragraph = builder.Build()
+        return paragraph
+
+    min_size = 1.0
+    max_size = float(max(box_width, box_height))
+    best_size = min_size
+    final_paragraph = None
+
+    # Binary search for optimal text size
+    for _ in range(100):
+        mid_size = (min_size + max_size) / 2
+        para = create_paragraph(text, mid_size)
+
+        para.layout(box_width)
+
+        if para.Height <= box_height and para.MinIntrinsicWidth <= box_width:
+            best_size = mid_size
+            min_size = mid_size
+            final_paragraph = para
+        else:
+            max_size = mid_size
+
+    if not extend_bbox and box_height * 0.9 <= best_size:
+        return render_single_text(image, bbox, text, True)
+
+    if final_paragraph is None:
+        final_paragraph = create_paragraph(text, best_size)
+        final_paragraph.layout(box_width)
+
+    surface = skia.Surface.MakeRasterN32Premul(box_width, box_height)
+    canvas = surface.getCanvas()
+
+    if not OVERFLOW_VISIBLE:
+        clip_rect = skia.Rect.MakeWH(box_width, box_height)
+        canvas.clipRect(clip_rect, skia.ClipOp.kIntersect, True)
+
+    final_paragraph.paint(canvas, 0, 0)
+
+    snapshot = surface.makeImageSnapshot()
+    image_array = snapshot.toarray(
+        colorType=skia.ColorType.kRGBA_8888_ColorType,
+        alphaType=skia.AlphaType.kUnpremul_AlphaType,
+    )
+
+    text_overlay = Image.fromarray(image_array, "RGBA")
+    image.paste(text_overlay, (int(x_min), int(y_min)), mask=text_overlay)
+
+    return image
+
+
+@beartype
+def _render_html_fragment(
+    html: str,
+    box_width: int,
+    box_height: int,
+    bg_color: str,
+    line_height: float,
+) -> Image.Image | None:
+    if box_width <= 0 or box_height <= 0:
+        return None
 
     styled_html = f"""
     <html>
@@ -61,6 +170,7 @@ def _render_single_html(
             body {{
                 overflow: hidden;
                 background-color: #{bg_color};
+                font-size: {line_height:.4f}px;
                 width: {box_width}px;
                 height: {box_height}px;
                 min-width: {box_width}px;
@@ -73,6 +183,16 @@ def _render_single_html(
                 margin: 0;
                 padding: 0;
             }}
+            body > div {{
+                width: 100%;
+                height: 100%;
+            }}
+            p {{
+                white-space: pre-wrap;
+            }}
+            table {{
+                width: 100%;
+            }}
         </style>
     </head>
     <body>
@@ -83,17 +203,69 @@ def _render_single_html(
 
     temp_filename = f"temp_render_{uuid.uuid4().hex}.png"
 
-    final_filename = hti.screenshot(
+    # Use the thread-local Html2Image instance
+    final_filename = thread_local.hti.screenshot(
         html_str=styled_html, save_as=temp_filename, size=(box_width, box_height)
     )[0]
 
     try:
-        html_image = Image.open(final_filename).convert("RGBA")
-
-        image.paste(html_image, (int(x_min), int(y_min)), mask=html_image)
+        with Image.open(final_filename) as img:
+            html_image = img.convert("RGBA")
     finally:
         if os.path.exists(final_filename):
             os.remove(final_filename)
+
+    return html_image
+
+
+def _draw_html(
+    image: Image.Image,
+    bboxes: Sequence[Sequence[int | float]],
+    html: Sequence[str | None],
+    line_height: Sequence[float],
+) -> Image.Image:
+    if len(bboxes) < len(html):
+        raise IndexError("length of html_fragments exceeds length of bboxes")
+
+    rgb_image = image.convert("RGB")
+    img_arr = np.array(rgb_image)
+
+    cpu_count = os.cpu_count() or 4
+    tasks = cast(list[tuple[Future, int, int]], [])
+
+    with ThreadPoolExecutor(max_workers=cpu_count, initializer=_init_thread) as exe:
+        for i, html_frag in enumerate(html):
+            if html_frag is None:
+                continue
+
+            bbox = _extend_bounding_box(image, bboxes[i])
+            x_min, y_min, x_max, y_max = map(int, bbox)
+
+            box_width = x_max - x_min
+            box_height = y_max - y_min
+
+            if box_width <= 0 or box_height <= 0:
+                continue
+
+            bg_color = np.median(img_arr[y_min:y_max, x_min:x_max], axis=(0, 1))
+            bg_color = "".join([f"{int(x):02x}" for x in bg_color])
+
+            future = exe.submit(
+                _render_html_fragment,
+                html_frag,
+                box_width,
+                box_height,
+                bg_color,
+                line_height[i],
+            )
+
+            tasks.append((future, x_min, y_min))
+
+        for i, (future, x_min, y_min) in enumerate(tasks):
+            html_image = future.result()
+
+            if html_image is not None:
+                image.paste(html_image, (x_min, y_min), mask=html_image)
 
     return image
 
@@ -215,7 +387,6 @@ def _extend_bounding_box(
     Args:
         image: Original PIL Image.
         bbox: Sequence of [xmin, ymin, xmax, ymax].
-        page_margin: Pixels to keep from the right end of the image.
 
     Returns:
         A new bounding box list with the extended xmax.
@@ -258,7 +429,9 @@ def _extend_bounding_box(
 def render_boxes(
     image: Image.Image,
     bboxes: Sequence[Sequence[int | float]],
+    text: Sequence[str | None] | None = None,
     html: Sequence[str | None] | None = None,
+    line_height: Sequence[float] | None = None,
     selected: int | None = None,
 ):
     image = image.convert("RGBA")
@@ -273,8 +446,6 @@ def render_boxes(
             else:
                 base_color = COLOR_NEXT
 
-            # Define the repeating stripe pattern.
-            # E.g., White -> Target Color -> Black -> Target Color
             stripe_pattern = ["white", base_color, "black", base_color]
 
             _draw_striped_rectangle(
@@ -287,12 +458,13 @@ def render_boxes(
 
     del draw
 
-    if html is not None:
-        if len(bboxes) < len(html):
-            raise IndexError("length of html_fragments exceeds length of bboxes")
+    if text is not None:
+        for bbox, t in zip(bboxes, text):
+            if t is not None:
+                image = render_single_text(image, bbox, t)
 
-        for i, html_frag in enumerate(html):
-            if html_frag is not None:
-                image = _render_single_html(image, bboxes[i], html_frag)
+    if html is not None:
+        assert line_height is not None
+        image = _draw_html(image, bboxes, html, line_height)
 
     return image

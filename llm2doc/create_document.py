@@ -1,13 +1,13 @@
 import os
 import re
 import json
-import pydantic_core
+from copy import deepcopy
 from pydantic import BaseModel
 from PIL import Image
 from openai import OpenAI
 from beartype import beartype
 from bs4 import BeautifulSoup
-from typing import Sequence, List, Any
+from typing import Sequence, List, Any, cast
 from openai.types.responses.response_input_param import ResponseInputParam
 
 from .analyze_layout import LayoutAnalyzer, ParsedDocument
@@ -36,6 +36,7 @@ The query should be in natural language. (e.g. "What best describes the document
 Once discovered, source document can be fetched using `fetch_source_document` tool.
 
 ## Tips
+* NEVER fabricate a new information on your own. Everything MUST be from the source document.
 * Strictly preserve the micro-formatting of the target block you are filling.
   * Examples:
   * If the target block is a continuous text paragraph, write a continuous text paragraph.
@@ -55,13 +56,25 @@ You need to decide if each source documents are relevant to the user query indiv
 
 # Output format
 Write the new document as a single HTML-ish document, in same style and layout of *target* document.
-You may reuse images present in any (source or target) document.
-Wrap the output in <document>...</document> tag just like the target document.
-The attribute `id` on div will be used to map them.
-You can omit an div if you want to reuse what's in the source document.
-Reusing is resource-friendly, so try to reuse blocks whenever possible (as long as it doesn't affect the task).
+You may use images present in any (source or target) document.
+Wrap the output in <document>...</document> tag just like the target document. The attribute `id` on div will be used to map them. Strictly keep the `page-x-block-y` format.
+You can omit an div if you want to reuse what's in the source document. Reusing is resource-friendly, so try to reuse blocks whenever possible (as long as it doesn't affect the task).
 
 Do not add any filler text, or they will be treated as part of the document you wrote.
+
+## Hydration
+In order to render each element, they will *individually* will go into hydration process.
+1. The div is wrapped with a body tag to form full HTML document.
+2. font-size of html tag is set to that of target document, so that 1rem = font size in target document.
+3. The body size is set to appropriate pixel.
+4. The div is set to have take full height and width.
+
+Therefore, you should style the element to best match the target document.
+Use inline style attribute. Tailwind does NOT work.
+Examples include:
+* Setting color of the text.
+* 'text-align' to center the text.
+* Flexbox to vertically center the text or table.
 
 # Actual input
 Now this is the end of the guide.
@@ -74,11 +87,15 @@ While the text below is not a complete HTML document (and should be not treated 
 
 ```css
 document > page > div {{
-  position: absolute;  /* Position is derived from the attribute `data-bbox` */
+  position: absolute;  /* Position and size is derived from the attribute `data-bbox` */
 }}
 
 document > page > div > p {{
   white-space: pre-wrap;
+}}
+
+table {{
+  width: 100%;
 }}
 ```
 
@@ -92,7 +109,7 @@ document > page > div > p {{
 """
 
 # target-page-1-block-1
-REGEX_DIV_ID = re.compile(r"^target-page-([0-9]+)-block-([0-9]+)$")
+REGEX_DIV_ID = re.compile(r"^(?:target-|output-)?page-([0-9]+)-block-([0-9]+)$")
 
 
 def pydantic_encoder(obj):
@@ -141,7 +158,7 @@ def write_document(
             tool_choice="auto",
         )
 
-        input += response.output
+        input += response.output  # type: ignore
 
         tool_calls = [
             item
@@ -188,7 +205,7 @@ def write_document(
 @beartype
 def create_document(query: str | None, src_docs: list[str], target_doc: str):
     if query is None:
-        query = "적당히 알아서 작성해줘."
+        query = "소스 문서 내용을 기반으로 작성해줘."
 
     # 필요한 파일들이 존재하는지 확인
     datas = os.listdir("data")
@@ -231,7 +248,12 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
 
     # 작성한 문서를 렌더링함
     bboxes = [[y.bbox for y in x.blocks] for x in target_doc_parsed.pages]
-    texts = [[None for _ in x.blocks] for x in target_doc_parsed.pages]
+    texts = [
+        [cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages
+    ]
+    htmls = [
+        [cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages
+    ]
 
     soup = BeautifulSoup(imagine.strip(), "lxml")
     document = soup.find("document")
@@ -252,31 +274,41 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
 
             if block.find("img") is not None:
                 print(f"[WARN] Ignoring div containing img: {block}")
+                texts[block_page][block_idx] = "[이미지]"
                 continue
 
             if block.find("table") is not None:
-                print(f"[WARN] Ignoring div containing table: {block}")
+                block = deepcopy(block)
+                block.attrs["id"] = "root"
+                htmls[block_page][block_idx] = str(block)
                 continue
 
             texts[block_page][block_idx] = block.text.strip()
 
-    valid_bboxes = [
-        [b for b, t in zip(page_bboxes, page_texts) if t is not None]
-        for page_bboxes, page_texts in zip(bboxes, texts)
-    ]
-    valid_texts = [[t for t in page_texts if t is not None] for page_texts in texts]
-
     for i, img in enumerate(target_doc_images):
+        valid_bboxes = []
+
+        for bbox, text, html in zip(bboxes[i], texts[i], htmls[i]):
+            if text is not None or html is not None:
+                valid_bboxes.append(bbox)
+
         img = img.copy()
-        for bbox in valid_bboxes[i]:
+        for bbox in valid_bboxes:
             img = erase_bounding_box(img, bbox)
 
-        img = render_boxes(img, valid_bboxes[i], valid_texts[i])
+        img = render_boxes(
+            img,
+            bboxes[i],
+            texts[i],
+            htmls[i],
+            [x.line_height for x in target_doc_parsed.pages[i].blocks],
+        )
+
         img.save(f"debug_finish_{i + 1}.png")
 
 
 if __name__ == "__main__":
-    option = 2
+    option = 0
 
     if option == 0:
         # KMC 레포트 (의도 자동 완성)
