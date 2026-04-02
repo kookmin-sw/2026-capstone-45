@@ -1,9 +1,12 @@
+import os
 import math
+import uuid
+import tempfile
 import numpy as np
-import skia
 from PIL import Image, ImageDraw
 from beartype import beartype
 from typing import Sequence
+from html2image import Html2Image
 
 
 COLOR_PRIOR = "green"
@@ -12,93 +15,91 @@ COLOR_NEXT = "red"
 
 LINE_WIDTH = 2
 
-# CSS-like ordered font stack
-FONT_FAMILIES = ["Noto Sans CJK KR", "Arial", "sans-serif"]
 
-COLOR_TEXT_SKIA = skia.ColorBLACK
-OVERFLOW_VISIBLE = False
+def _create_html2image_instance():
+    tempdir = tempfile.gettempdir()
 
-# Access textlayout directly through the skia module
-FONT_COLLECTION = skia.textlayout.FontCollection()
-FONT_COLLECTION.setDefaultFontManager(skia.FontMgr())
-UNICODE = skia.Unicodes.ICU.Make()
+    try:
+        return Html2Image(browser="chrome", output_path=tempdir)
+    except FileNotFoundError:
+        pass
+
+    try:
+        return Html2Image(browser="edge", output_path=tempdir)
+    except FileNotFoundError:
+        pass
+
+    raise RuntimeError("Could not find a suitable browser.")
+
+
+hti = _create_html2image_instance()
 
 
 @beartype
-def render_single_text(
-    image: Image.Image, bbox: Sequence[int | float], text: str
+def _render_single_html(
+    image: Image.Image, bbox: Sequence[int | float], html: str
 ) -> Image.Image:
-    # Unpack absolute coordinates
+    bbox = _extend_bounding_box(image, bbox)
     x_min, y_min, x_max, y_max = bbox
 
-    abs_width = x_max - x_min
-    abs_height = y_max - y_min
+    box_width = int(x_max - x_min)
+    box_height = int(y_max - y_min)
 
-    box_width = int(abs_width)
-    box_height = int(abs_height)
+    if box_width <= 0 or box_height <= 0:
+        return image
 
-    def create_paragraph(
-        text_content: str, font_size: float
-    ) -> skia.textlayout.Paragraph:
-        para_style = skia.textlayout.ParagraphStyle()
-        text_style = skia.textlayout.TextStyle()
-        text_style.setColor(COLOR_TEXT_SKIA)
-        text_style.setFontSize(font_size)
-        text_style.setFontFamilies(FONT_FAMILIES)
+    image = image.convert("RGB")
 
-        builder = skia.textlayout.ParagraphBuilder(para_style, FONT_COLLECTION, UNICODE)
-        builder.pushStyle(text_style)
-        builder.addText(text_content)
+    img_arr = np.array(image)
+    bg_color = np.median(img_arr[y_min:y_max, x_min:x_max], axis=(0, 1))
+    bg_color = "".join([f"{int(x):02x}" for x in bg_color])
 
-        paragraph = builder.Build()
-        return paragraph
+    styled_html = f"""
+    <html>
+    <head>
+        <style>
+            body {{
+                overflow: hidden;
+                background-color: #{bg_color};
+                width: {box_width}px;
+                height: {box_height}px;
+                min-width: {box_width}px;
+                min-height: {box_height}px;
+                max-width: {box_width}px;
+                max-height: {box_height}px;
+            }}
+            *, ::after, ::before {{
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }}
+        </style>
+    </head>
+    <body>
+        {html}
+    </body>
+    </html>
+    """
 
-    min_size = 1.0
-    max_size = float(max(box_width, box_height))
-    best_size = min_size
-    final_paragraph = None
+    temp_filename = f"temp_render_{uuid.uuid4().hex}.png"
 
-    # Binary search for optimal text size
-    for _ in range(100):
-        mid_size = (min_size + max_size) / 2
-        para = create_paragraph(text, mid_size)
+    final_filename = hti.screenshot(
+        html_str=styled_html, save_as=temp_filename, size=(box_width, box_height)
+    )[0]
 
-        para.layout(box_width)
+    try:
+        html_image = Image.open(final_filename).convert("RGBA")
 
-        if para.Height <= box_height and para.MinIntrinsicWidth <= box_width:
-            best_size = mid_size
-            min_size = mid_size
-            final_paragraph = para
-        else:
-            max_size = mid_size
-
-    if final_paragraph is None:
-        final_paragraph = create_paragraph(text, best_size)
-        final_paragraph.layout(box_width)
-
-    surface = skia.Surface.MakeRasterN32Premul(box_width, box_height)
-    canvas = surface.getCanvas()
-
-    if not OVERFLOW_VISIBLE:
-        clip_rect = skia.Rect.MakeWH(box_width, box_height)
-        canvas.clipRect(clip_rect, skia.ClipOp.kIntersect, True)
-
-    final_paragraph.paint(canvas, 0, 0)
-
-    snapshot = surface.makeImageSnapshot()
-    image_array = snapshot.toarray(
-        colorType=skia.ColorType.kRGBA_8888_ColorType,
-        alphaType=skia.AlphaType.kUnpremul_AlphaType,
-    )
-
-    text_overlay = Image.fromarray(image_array, "RGBA")
-    image.paste(text_overlay, (int(x_min), int(y_min)), mask=text_overlay)
+        image.paste(html_image, (int(x_min), int(y_min)), mask=html_image)
+    finally:
+        if os.path.exists(final_filename):
+            os.remove(final_filename)
 
     return image
 
 
 @beartype
-def draw_striped_rectangle(
+def _draw_striped_rectangle(
     draw: ImageDraw.ImageDraw,
     bbox: Sequence[int | float],
     colors: list,
@@ -203,10 +204,61 @@ def erase_bounding_box(image: Image.Image, bbox: list) -> Image.Image:
 
 
 @beartype
+def _extend_bounding_box(
+    image: Image.Image, bbox: Sequence[int | float]
+) -> list[int | float]:
+    """
+    Extends the bounding box to the right as long as the right border is a uniform color.
+    Terminates if any pixel on the right border differs in color (even before extending),
+    or if it reaches page_margin pixels from the right edge of the image.
+
+    Args:
+        image: Original PIL Image.
+        bbox: Sequence of [xmin, ymin, xmax, ymax].
+        page_margin: Pixels to keep from the right end of the image.
+
+    Returns:
+        A new bounding box list with the extended xmax.
+    """
+
+    PAGE_MARGIN = 8
+
+    xmin, ymin, xmax, ymax = [int(v) for v in bbox]
+
+    rgb_image = image.convert("RGB")
+    img_arr = np.array(rgb_image)
+    img_height, img_width = img_arr.shape[:2]
+
+    # Handle edge cases (invalid bounds, negative sizes)
+    if xmax <= 0 or xmax > img_width or ymin < 0 or ymax > img_height or ymin >= ymax:
+        return list(bbox)
+
+    right_border_x = xmax - 1
+    initial_border = img_arr[ymin:ymax, right_border_x]
+
+    reference_color = initial_border[0]
+    if not np.all(initial_border == reference_color):
+        return list(bbox)
+
+    new_xmax = xmax
+    max_limit_x = img_width - PAGE_MARGIN
+
+    for x in range(xmax, max_limit_x):
+        current_border = img_arr[ymin:ymax, x]
+
+        if np.all(current_border == reference_color):
+            new_xmax = x + 1
+        else:
+            break
+
+    return [bbox[0], bbox[1], type(bbox[2])(new_xmax), bbox[3]]
+
+
+@beartype
 def render_boxes(
     image: Image.Image,
     bboxes: Sequence[Sequence[int | float]],
-    texts: Sequence[str | None] | None = None,
+    html: Sequence[str | None] | None = None,
     selected: int | None = None,
 ):
     image = image.convert("RGBA")
@@ -225,7 +277,7 @@ def render_boxes(
             # E.g., White -> Target Color -> Black -> Target Color
             stripe_pattern = ["white", base_color, "black", base_color]
 
-            draw_striped_rectangle(
+            _draw_striped_rectangle(
                 draw=draw,
                 bbox=bbox,
                 colors=stripe_pattern,
@@ -235,12 +287,12 @@ def render_boxes(
 
     del draw
 
-    if texts is not None:
-        if len(bboxes) < len(texts):
-            raise IndexError("length of texts exceeds length of bboxes")
+    if html is not None:
+        if len(bboxes) < len(html):
+            raise IndexError("length of html_fragments exceeds length of bboxes")
 
-        for i, text in enumerate(texts):
-            if text is not None:
-                image = render_single_text(image, bboxes[i], text)
+        for i, html_frag in enumerate(html):
+            if html_frag is not None:
+                image = _render_single_html(image, bboxes[i], html_frag)
 
     return image
