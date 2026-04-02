@@ -46,6 +46,12 @@ Once discovered, source document can be fetched using `fetch_source_document` to
 * The goal is to fill the same amount of 'real estate' on each block. Use the target as a template for length, but don't feel obligated to hit an exact line count if the flow is better slightly shorter or longer.
 * Match the logical progression and rhetorical purpose of the target document. Keep the argument structure (e.g., Claim -> Evidence -> Summary) of the target.
 * Because both source and target are processed with OCR, it may contain typos or inconsistent line breaks. Try to mitigate them.
+* Understand that *contents* of the target document has nothing to do with what needs to be written. They are solely for style reference.
+
+## Tools
+When using search tool, use natural language to query. For instance, "What is lorem ipsum?" is better than "loerm ipsum origin root description".
+
+Think again after each tool call, and especially before you write your final answer.
 
 # Input format
 The user query decides what the user wants.
@@ -139,6 +145,7 @@ def write_document(
         ToolSearchSourceDocument([x.id for x in src_docs]),
     ]
 
+    reasoning = cast(list[str], [])
     fulfiled_tool_calls: set[str] = set()
 
     input: ResponseInputParam = [
@@ -150,6 +157,8 @@ def write_document(
         }
     ]
 
+    response_cnt = 0
+
     while True:
         response = client.responses.create(
             model=os.environ["OPENAI_MODEL"],
@@ -157,6 +166,17 @@ def write_document(
             tools=[x.description for x in tools],
             tool_choice="auto",
         )
+        response_cnt += 1
+
+        for item in response.output:
+            try:
+                if item.type == "reasoning" and item.content is not None:
+                    for content in item.content:
+                        reasoning.append(content.text)
+                elif item.type == "function_call" and item.arguments is not None:
+                    reasoning.append(f"function_call={item.name} {item.arguments}")
+            except Exception:
+                pass
 
         input += response.output  # type: ignore
 
@@ -185,17 +205,11 @@ def write_document(
     with open("debug_write_input.json", "wt", encoding="utf-8") as f:
         json.dump(input, f, default=pydantic_encoder)
 
-    with open("debug_write_output.json", "wt", encoding="utf-8") as f:
-        f.write(response.model_dump_json())
-
     with open("debug_write_output.txt", "wt", encoding="utf-8") as f:
         f.write(response.output_text)
 
-    if any((x.type == "reasoning" for x in response.output)):
-        with open("debug_write_reason.txt", "wt", encoding="utf-8") as f:
-            for output in response.output:
-                if output.type == "reasoning" and output.content is not None:
-                    f.write(output.content[0].text)
+    with open("debug_write_reason.txt", "wt", encoding="utf-8") as f:
+        f.write("\n----------\n".join(reasoning))
 
     print("Generation finished successfully.")
 
@@ -257,7 +271,7 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
 
     soup = BeautifulSoup(imagine.strip(), "lxml")
     document = soup.find("document")
-    assert document is not None
+    assert document is not None, "LLM이 문서를 생성하지 않았습니다"
 
     for i, page in enumerate(document.find_all("page", recursive=False)):
         for j, block in enumerate(page.find_all("div", recursive=False)):
@@ -308,14 +322,14 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
 
 
 if __name__ == "__main__":
-    option = 0
+    option = 1
 
     if option == 0:
         # KMC 레포트 (의도 자동 완성)
         create_document(None, ["financial2"], "financial1")
     elif option == 1:
         create_document(
-            "KMC 기업 보고서 작성해", ["financial2", "financial3"], "financial1"
+            "KMW 기업 보고서 작성해", ["financial2", "financial3"], "financial1"
         )
     elif option == 2:
         create_document(

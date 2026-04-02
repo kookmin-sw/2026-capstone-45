@@ -66,19 +66,3 @@ class ToolFetchSourceDocument:
             "output": f"Contents of document_id={document_id}, page_id={page_id}:\n{page_html}\n",
             "call_id": call_id,
         }
-
-        # LMStudio 미지원
-        # return {
-        #     "type": "function_call_output",
-        #     "output": [
-        #         {
-        #             "type": "input_text",
-        #             "text": f"Contents of document_id={document_id}, page_id={page_id}:\n{page_html}\nScreenshot (for visual reference):\n",
-        #         },
-        #         {
-        #             "type": "input_image",
-        #             "image_url": image_as_data_uri(page.screenshot),
-        #         },
-        #     ],
-        #     "call_id": call_id,
-        # }
