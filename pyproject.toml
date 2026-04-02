@@ -20,10 +20,15 @@ dependencies = [
     "pydantic>=2.12.5",
     "html2text>=2025.4.15",
     "beautifulsoup4>=4.14.3",
+    "chromadb>=1.5.5",
+    "opentelemetry-exporter-otlp-proto-grpc==1.25.0",  # https://github.com/chroma-core/chroma/issues/2571
 ]
 
 [tool.setuptools.packages.find]
 include = ["llm2doc*"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
 
 [tool.uv.sources]
 paddlepaddle = [

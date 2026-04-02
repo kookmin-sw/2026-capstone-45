@@ -1,13 +1,20 @@
 import os
 import re
+import json
+import pydantic_core
+from pydantic import BaseModel
 from PIL import Image
 from openai import OpenAI
 from beartype import beartype
 from bs4 import BeautifulSoup
+from typing import Sequence, List, Any
+from openai.types.responses.response_input_param import ResponseInputParam
 
 from .analyze_layout import LayoutAnalyzer, ParsedDocument
 from .render_image import render_boxes, erase_bounding_box
 from .util import image_as_data_uri
+from .tool_fetch_source_document import ToolFetchSourceDocument
+from .tool_search_source_document import ToolSearchSourceDocument
 
 
 PROMPT_WRITE = """
@@ -22,6 +29,11 @@ You should follow the narrative flow of the target document.
 
 Depending on the user query and/or style and layout of the target document, some of these source documents might be useless.
 Use the language of target document, unless the user query says otherwise.
+
+Source document is not present on this query directly, so use `search_source_document` tool to discover them.
+The query should be in natural language. (e.g. "What best describes the document?")
+
+Once discovered, source document can be fetched using `fetch_source_document` tool.
 
 ## Tips
 * Strictly preserve the micro-formatting of the target block you are filling.
@@ -75,107 +87,89 @@ document > page > div > p {{
 {query}
 </query>
 
-## Source documents
-{sources}
-
 ## Target document
 {target}
 """
 
-REGEX_NEWLINE = re.compile(r"[\r\n]+")
-REGEX_DIV_ID = re.compile(r"^page-([0-9]+)-block-([0-9]+)$")
+# target-page-1-block-1
+REGEX_DIV_ID = re.compile(r"^target-page-([0-9]+)-block-([0-9]+)$")
 
 
-@beartype
-def document_to_html(doc: ParsedDocument, doc_id: int | None = None) -> str:
-    result = []
-
-    if doc_id is None:
-        result.append("<document>\n")
-    else:
-        result.append(f'<document id="{doc_id}">\n')
-
-    for i, page in enumerate(doc.pages):
-        result.append(f'  <page id="page-{i + 1}">\n')
-
-        for j, block in enumerate(page.blocks):
-            bbox = [
-                block.bbox[0] * 1000 // page.width,
-                block.bbox[1] * 1000 // page.height,
-                block.bbox[2] * 1000 // page.width,
-                block.bbox[3] * 1000 // page.height,
-            ]
-            bbox_str = ", ".join([str(x) for x in bbox])
-
-            result.append(
-                f'    <div id="page-{i + 1}-block-{j + 1}" data-bbox="[{bbox_str}]">\n'
-            )
-
-            if block.is_text:
-                for line in REGEX_NEWLINE.split(block.content.strip()):
-                    result.append("      <p>")
-                    result.append(
-                        line.replace("&", "&amp;")
-                        .replace("<", "&lt;")
-                        .replace(">", "&gt;")
-                    )
-                    result.append("</p>\n")
-            elif block.is_image:
-                result.append(f'      <img src="/page-{i + 1}/block-{j + 1}/image">\n')
-            elif block.is_html:
-                result.append("      ")
-                result.append(block.content)
-                result.append("\n")
-            else:
-                print("[WARN] Block has no is_* directive")
-
-            result.append("    </div>\n")
-
-        result.append("  </page>\n")
-
-    result.append("</document>")
-
-    return "".join(result)
+def pydantic_encoder(obj):
+    """Tells json.dumps how to handle Pydantic models."""
+    if isinstance(obj, BaseModel):
+        return obj.model_dump()  # converts the model to a standard dict
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 @beartype
 def write_document(
     client: OpenAI,
     query: str,
-    src_docs: list[ParsedDocument],
+    src_docs: Sequence[ParsedDocument],
     target_doc: ParsedDocument,
-    target_doc_images: list[Image.Image],
 ) -> str:
     imagine_prompt = PROMPT_WRITE.strip().format(
         query=query,
-        sources="\n\n".join(
-            [document_to_html(x, i + 1) for i, x in enumerate(src_docs)]
-        ),
-        target=document_to_html(target_doc),
+        target=target_doc.to_sturctured_html(doc_id="target"),
     )
 
     with open("debug_write_input.txt", "wt", encoding="utf-8") as f:
         f.write(imagine_prompt)
 
-    # not used for now (VRAM OOM)
-    screenshots = []
-    for i, img_page in enumerate(target_doc_images):
-        screenshots.append({"type": "input_text", "text": f"\n### Page {i + 1}\n"})
-        screenshots.append(
-            {"type": "input_image", "image_url": image_as_data_uri(img_page)}
+    tools = [
+        ToolFetchSourceDocument(src_docs),
+        ToolSearchSourceDocument([x.id for x in src_docs]),
+    ]
+
+    fulfiled_tool_calls: set[str] = set()
+
+    input: ResponseInputParam = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": imagine_prompt},
+            ],
+        }
+    ]
+
+    while True:
+        response = client.responses.create(
+            model=os.environ["OPENAI_MODEL"],
+            input=input,
+            tools=[x.description for x in tools],
+            tool_choice="auto",
         )
 
-    response = client.responses.create(
-        model=os.environ["OPENAI_MODEL"],
-        input=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": imagine_prompt},
-                ],
-            }
-        ],
-    )
+        input += response.output
+
+        tool_calls = [
+            item
+            for item in response.output
+            if item.type == "function_call" and item.call_id not in fulfiled_tool_calls
+        ]
+        if len(tool_calls) == 0:
+            break
+
+        for tool_call in tool_calls:
+            found = False
+            for tool in tools:
+                if tool_call.name == tool.description["name"]:
+                    found = True
+                    break
+
+            if not found:
+                raise RuntimeError(f"unable to find tool for {tool_call}")
+
+            fulfiled_tool_calls.add(tool_call.call_id)
+            result = tool.invoke(tool_call.arguments, tool_call.call_id)
+            input.append(result)
+
+    with open("debug_write_input.json", "wt", encoding="utf-8") as f:
+        json.dump(input, f, default=pydantic_encoder)
+
+    with open("debug_write_output.json", "wt", encoding="utf-8") as f:
+        f.write(response.model_dump_json())
 
     with open("debug_write_output.txt", "wt", encoding="utf-8") as f:
         f.write(response.output_text)
@@ -183,8 +177,10 @@ def write_document(
     if any((x.type == "reasoning" for x in response.output)):
         with open("debug_write_reason.txt", "wt", encoding="utf-8") as f:
             for output in response.output:
-                if output.type == "reasoning":
+                if output.type == "reasoning" and output.content is not None:
                     f.write(output.content[0].text)
+
+    print("Generation finished successfully.")
 
     return response.output_text
 
@@ -230,7 +226,7 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
     ]
 
     imagine = write_document(
-        client, query, src_docs_parsed, target_doc_parsed, target_doc_images
+        client, query, src_docs_parsed, target_doc_parsed
     )
 
     # 작성한 문서를 렌더링함
@@ -239,9 +235,11 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
 
     soup = BeautifulSoup(imagine.strip(), "lxml")
     document = soup.find("document")
+    assert document is not None
+
     for i, page in enumerate(document.find_all("page", recursive=False)):
         for j, block in enumerate(page.find_all("div", recursive=False)):
-            m = REGEX_DIV_ID.match(block.attrs["id"])
+            m = REGEX_DIV_ID.match(str(block.attrs["id"]))
             if m is None:
                 continue
 

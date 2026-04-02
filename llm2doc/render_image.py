@@ -3,6 +3,7 @@ import numpy as np
 import skia
 from PIL import Image, ImageDraw
 from beartype import beartype
+from typing import Sequence
 
 
 COLOR_PRIOR = "green"
@@ -25,7 +26,7 @@ UNICODE = skia.Unicodes.ICU.Make()
 
 @beartype
 def render_single_text(
-    image: Image.Image, bbox: list[int | float], text: str
+    image: Image.Image, bbox: Sequence[int | float], text: str
 ) -> Image.Image:
     # Unpack absolute coordinates
     x_min, y_min, x_max, y_max = bbox
@@ -99,7 +100,7 @@ def render_single_text(
 @beartype
 def draw_striped_rectangle(
     draw: ImageDraw.ImageDraw,
-    bbox: list[int | float],
+    bbox: Sequence[int | float],
     colors: list,
     width: int,
     dash_length: int,
@@ -204,8 +205,8 @@ def erase_bounding_box(image: Image.Image, bbox: list) -> Image.Image:
 @beartype
 def render_boxes(
     image: Image.Image,
-    bboxes: list[list[int | float]],
-    texts: list[str | None] | None = None,
+    bboxes: Sequence[Sequence[int | float]],
+    texts: Sequence[str | None] | None = None,
     selected: int | None = None,
 ):
     image = image.convert("RGBA")
