@@ -64,7 +64,7 @@ You need to decide if each source documents are relevant to the user query indiv
 # Output format
 Write the new document as a single HTML-ish document, in same style and layout of *target* document.
 You may use images present in any (source or target) document.
-Wrap the output in <document>...</document> tag just like the target document. The attribute `id` on div will be used to map them. Strictly keep the `page-x-block-y` format.
+Wrap the output in <document id="output">...</document> tag just like the target document. The attribute `id` on div will be used to map them. Strictly keep the `output-page-x-block-y` format.
 You can omit an div if you want to reuse what's in the source document. Reusing is resource-friendly, so try to reuse blocks whenever possible (as long as it doesn't affect the task).
 
 Do not add any filler text, or they will be treated as part of the document you wrote.
