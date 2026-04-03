@@ -18,6 +18,7 @@ from paddlex.inference.pipelines.paddleocr_vl.result import (
 from paddlex.inference.models.text_detection.result import TextDetResult
 
 from .util import validate_type
+from .render_image import render_boxes
 
 
 REGEX_NEWLINE = re.compile(r"[\r\n]+")
@@ -112,6 +113,21 @@ class ParsedPage:
         result.append("</page>\n")
 
         return "".join(result)
+
+    def reconstruct_image(self) -> Image.Image:
+        reconstructed_img = Image.new("RGB", (self.width, self.height), color="white")
+
+        bboxes = []
+        texts = []
+
+        for block in self.blocks:
+            if not block.is_text:
+                continue
+
+            bboxes.append(block.bbox)
+            texts.append(block.content.strip())
+
+        return render_boxes(reconstructed_img, bboxes=bboxes, selected=-1, text=texts)
 
 
 @beartype
