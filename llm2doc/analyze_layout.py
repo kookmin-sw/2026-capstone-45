@@ -309,8 +309,9 @@ class LayoutAnalyzer:
         return float(line_height)
 
 
-def recreate_cache():
-    LayoutAnalyzer.clear_cache()
+def populate_cache(clear_all: bool = False):
+    if clear_all:
+        LayoutAnalyzer.clear_cache()
 
     layout_analyzer = LayoutAnalyzer()
 
