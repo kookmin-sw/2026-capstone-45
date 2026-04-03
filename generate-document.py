@@ -1,11 +1,10 @@
 from dotenv import load_dotenv
-from llm2doc.fill_document import fill_document
+from llm2doc.create_document import create_document
 
 
 def main():
     load_dotenv()
-
-    fill_document()
+    create_document(None, ["financial1"], "financial2")
 
 
 if __name__ == "__main__":

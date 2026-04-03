@@ -1,6 +1,7 @@
 import os
 import re
 import json
+from dotenv import load_dotenv
 from copy import deepcopy
 from pydantic import BaseModel
 from PIL import Image
@@ -322,6 +323,7 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
 
 
 if __name__ == "__main__":
+    load_dotenv()
     option = 1
 
     if option == 0:
