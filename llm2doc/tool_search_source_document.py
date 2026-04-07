@@ -105,6 +105,8 @@ class ToolSearchSourceDocument:
         else:
             raise ValueError("document list is empty")
 
+        print(f"[검색] {query}")
+
         results = self.collection.query(
             query_texts=[query],
             n_results=3,

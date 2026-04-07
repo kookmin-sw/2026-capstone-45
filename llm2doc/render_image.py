@@ -1,9 +1,18 @@
+import os
 import math
+import uuid
+import tempfile
+import threading
+import time
 import numpy as np
+import random
 import skia
+
 from PIL import Image, ImageDraw
 from beartype import beartype
-from typing import Sequence
+from typing import Sequence, cast
+from html2image import Html2Image
+from concurrent.futures import Future, ThreadPoolExecutor
 
 
 COLOR_PRIOR = "green"
@@ -15,7 +24,6 @@ LINE_WIDTH = 2
 # CSS-like ordered font stack
 FONT_FAMILIES = ["Noto Sans CJK KR", "Arial", "sans-serif"]
 
-COLOR_TEXT_SKIA = skia.ColorBLACK
 OVERFLOW_VISIBLE = False
 
 # Access textlayout directly through the skia module
@@ -23,13 +31,57 @@ FONT_COLLECTION = skia.textlayout.FontCollection()
 FONT_COLLECTION.setDefaultFontManager(skia.FontMgr())
 UNICODE = skia.Unicodes.ICU.Make()
 
+# Thread-local storage to hold per-thread Html2Image instances
+thread_local = threading.local()
+
+
+def _create_html2image_instance():
+    tempdir = tempfile.gettempdir()
+    tempdir = os.path.join(tempdir, uuid.uuid4().hex)
+
+    try:
+        return Html2Image(
+            browser="chrome",
+            temp_path=tempdir,
+            output_path=tempdir,
+            disable_logging=True,
+        )
+    except FileNotFoundError:
+        pass
+
+    try:
+        return Html2Image(
+            browser="edge", temp_path=tempdir, output_path=tempdir, disable_logging=True
+        )
+    except FileNotFoundError:
+        pass
+
+    raise RuntimeError("Could not find a suitable browser.")
+
+
+def _init_thread():
+    """Initializes thread-local storage for the thread pool worker."""
+    thread_local.hti = _create_html2image_instance()
+
 
 @beartype
 def render_single_text(
-    image: Image.Image, bbox: Sequence[int | float], text: str
+    image: Image.Image,
+    bbox: Sequence[int | float],
+    text: str,
+    extend_bbox: bool = False,
 ) -> Image.Image:
-    # Unpack absolute coordinates
-    x_min, y_min, x_max, y_max = bbox
+    if extend_bbox:
+        bbox = _extend_bounding_box(image, bbox)
+
+    x_min, y_min, x_max, y_max = map(int, bbox)
+
+    img_arr = np.asarray(image.convert("RGB"))
+    bg_color = np.median(img_arr[y_min:y_max, x_min:x_max], axis=(0, 1))
+    if np.mean(bg_color) < 127:
+        text_color = skia.ColorWHITE
+    else:
+        text_color = skia.ColorBLACK
 
     abs_width = x_max - x_min
     abs_height = y_max - y_min
@@ -42,7 +94,7 @@ def render_single_text(
     ) -> skia.textlayout.Paragraph:
         para_style = skia.textlayout.ParagraphStyle()
         text_style = skia.textlayout.TextStyle()
-        text_style.setColor(COLOR_TEXT_SKIA)
+        text_style.setColor(text_color)
         text_style.setFontSize(font_size)
         text_style.setFontFamilies(FONT_FAMILIES)
 
@@ -72,6 +124,9 @@ def render_single_text(
         else:
             max_size = mid_size
 
+    if not extend_bbox and box_height * 0.9 <= best_size:
+        return render_single_text(image, bbox, text, True)
+
     if final_paragraph is None:
         final_paragraph = create_paragraph(text, best_size)
         final_paragraph.layout(box_width)
@@ -98,7 +153,125 @@ def render_single_text(
 
 
 @beartype
-def draw_striped_rectangle(
+def _render_html_fragment(
+    html: str,
+    box_width: int,
+    box_height: int,
+    bg_color: str,
+    line_height: float,
+) -> Image.Image | None:
+    if box_width <= 0 or box_height <= 0:
+        return None
+
+    styled_html = f"""
+    <html>
+    <head>
+        <style>
+            body {{
+                overflow: hidden;
+                background-color: #{bg_color};
+                font-size: {line_height:.4f}px;
+                width: {box_width}px;
+                height: {box_height}px;
+                min-width: {box_width}px;
+                min-height: {box_height}px;
+                max-width: {box_width}px;
+                max-height: {box_height}px;
+            }}
+            *, ::after, ::before {{
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }}
+            body > div {{
+                width: 100%;
+                height: 100%;
+            }}
+            p {{
+                white-space: pre-wrap;
+            }}
+            table {{
+                width: 100%;
+            }}
+        </style>
+    </head>
+    <body>
+        {html}
+    </body>
+    </html>
+    """
+
+    temp_filename = f"temp_render_{uuid.uuid4().hex}.png"
+
+    # Use the thread-local Html2Image instance
+    final_filename = thread_local.hti.screenshot(
+        html_str=styled_html, save_as=temp_filename, size=(box_width, box_height)
+    )[0]
+
+    try:
+        with Image.open(final_filename) as img:
+            html_image = img.convert("RGBA")
+    finally:
+        if os.path.exists(final_filename):
+            os.remove(final_filename)
+
+    return html_image
+
+
+def _draw_html(
+    image: Image.Image,
+    bboxes: Sequence[Sequence[int | float]],
+    html: Sequence[str | None],
+    line_height: Sequence[float],
+) -> Image.Image:
+    if len(bboxes) < len(html):
+        raise IndexError("length of html_fragments exceeds length of bboxes")
+
+    rgb_image = image.convert("RGB")
+    img_arr = np.array(rgb_image)
+
+    cpu_count = os.cpu_count() or 4
+    tasks = cast(list[tuple[Future, int, int]], [])
+
+    with ThreadPoolExecutor(max_workers=cpu_count, initializer=_init_thread) as exe:
+        for i, html_frag in enumerate(html):
+            if html_frag is None:
+                continue
+
+            bbox = _extend_bounding_box(image, bboxes[i])
+            x_min, y_min, x_max, y_max = map(int, bbox)
+
+            box_width = x_max - x_min
+            box_height = y_max - y_min
+
+            if box_width <= 0 or box_height <= 0:
+                continue
+
+            bg_color = np.median(img_arr[y_min:y_max, x_min:x_max], axis=(0, 1))
+            bg_color = "".join([f"{int(x):02x}" for x in bg_color])
+
+            future = exe.submit(
+                _render_html_fragment,
+                html_frag,
+                box_width,
+                box_height,
+                bg_color,
+                line_height[i],
+            )
+
+            tasks.append((future, x_min, y_min))
+
+        for i, (future, x_min, y_min) in enumerate(tasks):
+            html_image = future.result()
+
+            if html_image is not None:
+                image.paste(html_image, (x_min, y_min), mask=html_image)
+
+    return image
+
+
+@beartype
+def _draw_striped_rectangle(
     draw: ImageDraw.ImageDraw,
     bbox: Sequence[int | float],
     colors: list,
@@ -203,10 +376,62 @@ def erase_bounding_box(image: Image.Image, bbox: list) -> Image.Image:
 
 
 @beartype
+def _extend_bounding_box(
+    image: Image.Image, bbox: Sequence[int | float]
+) -> list[int | float]:
+    """
+    Extends the bounding box to the right as long as the right border is a uniform color.
+    Terminates if any pixel on the right border differs in color (even before extending),
+    or if it reaches page_margin pixels from the right edge of the image.
+
+    Args:
+        image: Original PIL Image.
+        bbox: Sequence of [xmin, ymin, xmax, ymax].
+
+    Returns:
+        A new bounding box list with the extended xmax.
+    """
+
+    PAGE_MARGIN = 8
+
+    xmin, ymin, xmax, ymax = [int(v) for v in bbox]
+
+    rgb_image = image.convert("RGB")
+    img_arr = np.array(rgb_image)
+    img_height, img_width = img_arr.shape[:2]
+
+    # Handle edge cases (invalid bounds, negative sizes)
+    if xmax <= 0 or xmax > img_width or ymin < 0 or ymax > img_height or ymin >= ymax:
+        return list(bbox)
+
+    right_border_x = xmax - 1
+    initial_border = img_arr[ymin:ymax, right_border_x]
+
+    reference_color = initial_border[0]
+    if not np.all(initial_border == reference_color):
+        return list(bbox)
+
+    new_xmax = xmax
+    max_limit_x = img_width - PAGE_MARGIN
+
+    for x in range(xmax, max_limit_x):
+        current_border = img_arr[ymin:ymax, x]
+
+        if np.all(current_border == reference_color):
+            new_xmax = x + 1
+        else:
+            break
+
+    return [bbox[0], bbox[1], type(bbox[2])(new_xmax), bbox[3]]
+
+
+@beartype
 def render_boxes(
     image: Image.Image,
     bboxes: Sequence[Sequence[int | float]],
-    texts: Sequence[str | None] | None = None,
+    text: Sequence[str | None] | None = None,
+    html: Sequence[str | None] | None = None,
+    line_height: Sequence[float] | None = None,
     selected: int | None = None,
 ):
     image = image.convert("RGBA")
@@ -221,11 +446,9 @@ def render_boxes(
             else:
                 base_color = COLOR_NEXT
 
-            # Define the repeating stripe pattern.
-            # E.g., White -> Target Color -> Black -> Target Color
             stripe_pattern = ["white", base_color, "black", base_color]
 
-            draw_striped_rectangle(
+            _draw_striped_rectangle(
                 draw=draw,
                 bbox=bbox,
                 colors=stripe_pattern,
@@ -235,12 +458,13 @@ def render_boxes(
 
     del draw
 
-    if texts is not None:
-        if len(bboxes) < len(texts):
-            raise IndexError("length of texts exceeds length of bboxes")
+    if text is not None:
+        for bbox, t in zip(bboxes, text):
+            if t is not None:
+                image = render_single_text(image, bbox, t)
 
-        for i, text in enumerate(texts):
-            if text is not None:
-                image = render_single_text(image, bboxes[i], text)
+    if html is not None:
+        assert line_height is not None
+        image = _draw_html(image, bboxes, html, line_height)
 
     return image

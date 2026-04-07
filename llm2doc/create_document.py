@@ -1,13 +1,14 @@
 import os
 import re
 import json
-import pydantic_core
+from dotenv import load_dotenv
+from copy import deepcopy
 from pydantic import BaseModel
 from PIL import Image
 from openai import OpenAI
 from beartype import beartype
 from bs4 import BeautifulSoup
-from typing import Sequence, List, Any
+from typing import Sequence, List, Any, cast
 from openai.types.responses.response_input_param import ResponseInputParam
 
 from .analyze_layout import LayoutAnalyzer, ParsedDocument
@@ -36,6 +37,7 @@ The query should be in natural language. (e.g. "What best describes the document
 Once discovered, source document can be fetched using `fetch_source_document` tool.
 
 ## Tips
+* NEVER fabricate a new information on your own. Everything MUST be from the source document.
 * Strictly preserve the micro-formatting of the target block you are filling.
   * Examples:
   * If the target block is a continuous text paragraph, write a continuous text paragraph.
@@ -45,6 +47,12 @@ Once discovered, source document can be fetched using `fetch_source_document` to
 * The goal is to fill the same amount of 'real estate' on each block. Use the target as a template for length, but don't feel obligated to hit an exact line count if the flow is better slightly shorter or longer.
 * Match the logical progression and rhetorical purpose of the target document. Keep the argument structure (e.g., Claim -> Evidence -> Summary) of the target.
 * Because both source and target are processed with OCR, it may contain typos or inconsistent line breaks. Try to mitigate them.
+* Understand that *contents* of the target document has nothing to do with what needs to be written. They are solely for style reference.
+
+## Tools
+When using search tool, use natural language to query. For instance, "What is lorem ipsum?" is better than "loerm ipsum origin root description".
+
+Think again after each tool call, and especially before you write your final answer.
 
 # Input format
 The user query decides what the user wants.
@@ -55,13 +63,25 @@ You need to decide if each source documents are relevant to the user query indiv
 
 # Output format
 Write the new document as a single HTML-ish document, in same style and layout of *target* document.
-You may reuse images present in any (source or target) document.
-Wrap the output in <document>...</document> tag just like the target document.
-The attribute `id` on div will be used to map them.
-You can omit an div if you want to reuse what's in the source document.
-Reusing is resource-friendly, so try to reuse blocks whenever possible (as long as it doesn't affect the task).
+You may use images present in any (source or target) document.
+Wrap the output in <document id="output">...</document> tag just like the target document. The attribute `id` on div will be used to map them. Strictly keep the `output-page-x-block-y` format.
+You can omit an div if you want to reuse what's in the source document. Reusing is resource-friendly, so try to reuse blocks whenever possible (as long as it doesn't affect the task).
 
 Do not add any filler text, or they will be treated as part of the document you wrote.
+
+## Hydration
+In order to render each element, they will *individually* will go into hydration process.
+1. The div is wrapped with a body tag to form full HTML document.
+2. font-size of html tag is set to that of target document, so that 1rem = font size in target document.
+3. The body size is set to appropriate pixel.
+4. The div is set to have take full height and width.
+
+Therefore, you should style the element to best match the target document.
+Use inline style attribute. Tailwind does NOT work.
+Examples include:
+* Setting color of the text.
+* 'text-align' to center the text.
+* Flexbox to vertically center the text or table.
 
 # Actual input
 Now this is the end of the guide.
@@ -74,11 +94,15 @@ While the text below is not a complete HTML document (and should be not treated 
 
 ```css
 document > page > div {{
-  position: absolute;  /* Position is derived from the attribute `data-bbox` */
+  position: absolute;  /* Position and size is derived from the attribute `data-bbox` */
 }}
 
 document > page > div > p {{
   white-space: pre-wrap;
+}}
+
+table {{
+  width: 100%;
 }}
 ```
 
@@ -92,7 +116,7 @@ document > page > div > p {{
 """
 
 # target-page-1-block-1
-REGEX_DIV_ID = re.compile(r"^target-page-([0-9]+)-block-([0-9]+)$")
+REGEX_DIV_ID = re.compile(r"^(?:target-|output-)?page-([0-9]+)-block-([0-9]+)$")
 
 
 def pydantic_encoder(obj):
@@ -122,6 +146,7 @@ def write_document(
         ToolSearchSourceDocument([x.id for x in src_docs]),
     ]
 
+    reasoning = cast(list[str], [])
     fulfiled_tool_calls: set[str] = set()
 
     input: ResponseInputParam = [
@@ -133,6 +158,8 @@ def write_document(
         }
     ]
 
+    response_cnt = 0
+
     while True:
         response = client.responses.create(
             model=os.environ["OPENAI_MODEL"],
@@ -140,8 +167,19 @@ def write_document(
             tools=[x.description for x in tools],
             tool_choice="auto",
         )
+        response_cnt += 1
 
-        input += response.output
+        for item in response.output:
+            try:
+                if item.type == "reasoning" and item.content is not None:
+                    for content in item.content:
+                        reasoning.append(content.text)
+                elif item.type == "function_call" and item.arguments is not None:
+                    reasoning.append(f"function_call={item.name} {item.arguments}")
+            except Exception:
+                pass
+
+        input += response.output  # type: ignore
 
         tool_calls = [
             item
@@ -168,17 +206,11 @@ def write_document(
     with open("debug_write_input.json", "wt", encoding="utf-8") as f:
         json.dump(input, f, default=pydantic_encoder)
 
-    with open("debug_write_output.json", "wt", encoding="utf-8") as f:
-        f.write(response.model_dump_json())
-
     with open("debug_write_output.txt", "wt", encoding="utf-8") as f:
         f.write(response.output_text)
 
-    if any((x.type == "reasoning" for x in response.output)):
-        with open("debug_write_reason.txt", "wt", encoding="utf-8") as f:
-            for output in response.output:
-                if output.type == "reasoning" and output.content is not None:
-                    f.write(output.content[0].text)
+    with open("debug_write_reason.txt", "wt", encoding="utf-8") as f:
+        f.write("\n----------\n".join(reasoning))
 
     print("Generation finished successfully.")
 
@@ -188,7 +220,7 @@ def write_document(
 @beartype
 def create_document(query: str | None, src_docs: list[str], target_doc: str):
     if query is None:
-        query = "적당히 알아서 작성해줘."
+        query = "소스 문서 내용을 기반으로 작성해줘."
 
     # 필요한 파일들이 존재하는지 확인
     datas = os.listdir("data")
@@ -231,11 +263,16 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
 
     # 작성한 문서를 렌더링함
     bboxes = [[y.bbox for y in x.blocks] for x in target_doc_parsed.pages]
-    texts = [[None for _ in x.blocks] for x in target_doc_parsed.pages]
+    texts = [
+        [cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages
+    ]
+    htmls = [
+        [cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages
+    ]
 
     soup = BeautifulSoup(imagine.strip(), "lxml")
     document = soup.find("document")
-    assert document is not None
+    assert document is not None, "LLM이 문서를 생성하지 않았습니다"
 
     for i, page in enumerate(document.find_all("page", recursive=False)):
         for j, block in enumerate(page.find_all("div", recursive=False)):
@@ -252,42 +289,34 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
 
             if block.find("img") is not None:
                 print(f"[WARN] Ignoring div containing img: {block}")
+                texts[block_page][block_idx] = "[이미지]"
                 continue
 
             if block.find("table") is not None:
-                print(f"[WARN] Ignoring div containing table: {block}")
+                block = deepcopy(block)
+                block.attrs["id"] = "root"
+                htmls[block_page][block_idx] = str(block)
                 continue
 
             texts[block_page][block_idx] = block.text.strip()
 
-    valid_bboxes = [
-        [b for b, t in zip(page_bboxes, page_texts) if t is not None]
-        for page_bboxes, page_texts in zip(bboxes, texts)
-    ]
-    valid_texts = [[t for t in page_texts if t is not None] for page_texts in texts]
-
     for i, img in enumerate(target_doc_images):
+        valid_bboxes = []
+
+        for bbox, text, html in zip(bboxes[i], texts[i], htmls[i]):
+            if text is not None or html is not None:
+                valid_bboxes.append(bbox)
+
         img = img.copy()
-        for bbox in valid_bboxes[i]:
+        for bbox in valid_bboxes:
             img = erase_bounding_box(img, bbox)
 
-        img = render_boxes(img, valid_bboxes[i], valid_texts[i])
+        img = render_boxes(
+            img,
+            bboxes[i],
+            texts[i],
+            htmls[i],
+            [x.line_height for x in target_doc_parsed.pages[i].blocks],
+        )
+
         img.save(f"debug_finish_{i + 1}.png")
-
-
-if __name__ == "__main__":
-    option = 2
-
-    if option == 0:
-        # KMC 레포트 (의도 자동 완성)
-        create_document(None, ["financial2"], "financial1")
-    elif option == 1:
-        create_document(
-            "KMC 기업 보고서 작성해", ["financial2", "financial3"], "financial1"
-        )
-    elif option == 2:
-        create_document(
-            "삼성전자 관련 데일리 브리핑 작성해 (시장 전체 말고 삼성전자만)",
-            ["blog1", "financial1", "financial3"],
-            "financial2",
-        )
