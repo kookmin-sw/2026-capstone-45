@@ -3,7 +3,7 @@ from llm2doc.create_document import create_document
 
 
 def main():
-    load_dotenv()
+    load_dotenv(override=True)
     option = 3
 
     if option == 0:
