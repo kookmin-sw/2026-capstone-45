@@ -16,6 +16,7 @@ from .render_image import render_boxes, erase_bounding_box
 from .util import image_as_data_uri
 from .tool_fetch_source_document import ToolFetchSourceDocument
 from .tool_search_source_document import ToolSearchSourceDocument
+from .tool_ask_user_question import ToolAskUserQuestion
 
 
 PROMPT_WRITE = """
@@ -54,6 +55,8 @@ When using search tool, use natural language to query. For instance, "What is lo
 
 Think again after each tool call, and especially before you write your final answer.
 
+Note that user cannot read the generated document until you finish. That means you must NOT ask the user regarding what you wrote.
+
 # Input format
 The user query decides what the user wants.
 This can be vague, and if so, you need to figure out what to write given the documents.
@@ -70,7 +73,7 @@ You can omit an div if you want to reuse what's in the source document. Reusing 
 Do not add any filler text, or they will be treated as part of the document you wrote.
 
 ## Hydration
-In order to render each element, they will *individually* will go into hydration process.
+In order to render each block, they will go into hydration process *individually*.
 1. The div is wrapped with a body tag to form full HTML document.
 2. font-size of html tag is set to that of target document, so that 1rem = font size in target document.
 3. The body size is set to appropriate pixel.
@@ -144,6 +147,7 @@ def write_document(
     tools = [
         ToolFetchSourceDocument(src_docs),
         ToolSearchSourceDocument([x.id for x in src_docs]),
+        ToolAskUserQuestion(),
     ]
 
     reasoning = cast(list[str], [])
