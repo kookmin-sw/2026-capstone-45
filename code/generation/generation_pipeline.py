@@ -1,9 +1,10 @@
 import json
 import re
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from ..generation_backends.qwen_transformers import QwenGenerationBackend
+from ..generation_backends import QwenGenerationAPIBackend, QwenGenerationBackend
 from ..types import dataclass_to_dict
 from ..utils import clean_text, ensure_dir, save_json
 from .generation_schema import parse_slot_draft_response
@@ -915,7 +916,7 @@ def _resolve_slot_draft(
     blueprint: Dict[str, object],
     fact_pack: Dict[str, object],
     config: GenerationConfig,
-    backend: Optional[QwenGenerationBackend] = None,
+    backend: Optional[QwenGenerationAPIBackend] = None,
 ) -> Tuple[SlotDraft, Optional[GenerationTraceEntry], bool]:
     fallback_draft = _rule_slot_text(slot, assignment, fact_lookup)
     if slot.preserve_reference_text or assignment.preserve_reference_text or config.mode == "rule":
@@ -953,7 +954,7 @@ def _resolve_slot_draft(
         style_tokens=blueprint.get("style_tokens", {}),
     )
     payload_dict = dataclass_to_dict(payload)
-    runtime_backend = backend or QwenGenerationBackend()
+    runtime_backend = backend or QwenGenerationAPIBackend()
     raw_response = None
     latency_ms = 0
     try:
@@ -1141,9 +1142,10 @@ def build_generated_document(
     preserved_count = 0
     fallback_count = 0
     needs_review_count = 0
-    for slot in slots:
+
+    def process_slot(slot):
         assignment = plan_lookup[slot.slot_id]
-        draft, trace, used_model = _resolve_slot_draft(
+        return _resolve_slot_draft(
             slot=slot,
             assignment=assignment,
             fact_lookup=fact_lookup,
@@ -1151,6 +1153,12 @@ def build_generated_document(
             fact_pack=fact_pack,
             config=generation_config,
         )
+
+    from tqdm import tqdm
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = list(tqdm(executor.map(process_slot, slots), total=len(slots), desc="Generating slots"))
+
+    for draft, trace, used_model in results:
         drafts.append(draft)
         if trace is not None:
             traces.append(trace)
@@ -1162,11 +1170,17 @@ def build_generated_document(
             preserved_count += 1
         if draft.needs_review:
             needs_review_count += 1
+
     markdown = _render_markdown(drafts)
     html_output = _render_html(blueprint, drafts)
+    
+    backend_name = "rule"
+    if generation_config.mode == "qwen":
+        backend_name = "qwen_generation_api" if generation_config.runtime == "api" else "qwen_generation_transformers"
+
     summary = GenerationRunSummary(
         mode=generation_config.mode,
-        backend="qwen_generation_transformers" if generation_config.mode == "qwen" else "rule",
+        backend=backend_name,
         model_name=generation_config.model_name if generation_config.mode == "qwen" else None,
         prompt_version=generation_config.prompt_version if generation_config.mode == "qwen" else None,
         slot_count=len(slots),

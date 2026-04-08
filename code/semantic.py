@@ -3,6 +3,7 @@ from statistics import mean
 from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .semantic_backends.qwen_transformers import QwenTransformersBackend
 from .semantic_context import build_block_context
@@ -143,7 +144,8 @@ def apply_financial_semantic_overlay(
 ) -> SemanticRunSummary:
     config = config or SemanticConfig()
     analysis_map: Dict[int, PageAnalysis] = {analysis.page: analysis for analysis in analyses}
-    summary_backend = "heuristic" if config.mode == "rule" else "qwen_transformers"
+    backend_name_str = backend.backend_name if backend else ("qwen_api" if config.runtime == "api" else "qwen_transformers")
+    summary_backend = "heuristic" if config.mode == "rule" else backend_name_str
     fallback_reasons: Counter = Counter()
     applied_source_counts: Counter = Counter()
     confidence_values: List[float] = []
@@ -168,6 +170,10 @@ def apply_financial_semantic_overlay(
         if config.mode != "rule":
             progress_bar = tqdm(total=len(blocks), desc=f"Processing Page {page.page}", unit="block")
 
+        # 순차적 처리가 필요한 rule 및 예외 블록 선별, 병렬 처리할 작업 스케줄링
+        tasks = []
+        sync_results = {}
+        
         for block in blocks:
             _reset_semantic_fields(block)
             actual_rule_decision = legacy_rule_decisions.get(block.block_id)
@@ -175,17 +181,16 @@ def apply_financial_semantic_overlay(
             fallback_decision = safety_rule_decision or make_unknown_decision(block)
 
             if config.mode == "rule":
-                if actual_rule_decision is None:
-                    continue
-                _apply_decision_to_block(
-                    block,
-                    actual_rule_decision,
-                    source="rule",
-                    backend_name="heuristic",
-                    config=config,
-                )
-                applied_source_counts["rule"] += 1
-                confidence_values.append(actual_rule_decision.role_confidence)
+                if actual_rule_decision is not None:
+                    _apply_decision_to_block(
+                        block,
+                        actual_rule_decision,
+                        source="rule",
+                        backend_name="heuristic",
+                        config=config,
+                    )
+                    applied_source_counts["rule"] += 1
+                    confidence_values.append(actual_rule_decision.role_confidence)
                 continue
 
             if not _eligible_for_qwen(block):
@@ -210,63 +215,73 @@ def apply_financial_semantic_overlay(
                 config=config,
                 document_family=document_family,
             )
-            final_decision, trace_entry, fallback_reason, qwen_accepted = resolve_block_decision(
-                payload=payload,
-                fallback_decision=fallback_decision,
-                config=config,
-                backend=backend,
-            )
-            if trace_entry is not None:
-                trace_entries.append(trace_entry)
-                if trace_entry.raw_response is not None or trace_entry.fallback_reason in {"backend_error", "invalid_json", "schema_mismatch"}:
-                    attempted_count += 1
-            if fallback_reason:
-                fallback_reasons[fallback_reason] += 1
-                fallback_count += 1
+            
+            # API 기반이면 태스크 수집
+            tasks.append((block, payload, fallback_decision, actual_rule_decision, safety_rule_decision))
 
-            if config.mode == "shadow":
-                if actual_rule_decision is not None:
+        # 병렬 처리 실행
+        if tasks:
+            max_workers = 10 if config.runtime == "api" else 1
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_meta = {
+                    executor.submit(resolve_block_decision, payload=p, fallback_decision=f, config=config, backend=backend): (b, a, s)
+                    for b, p, f, a, s in tasks
+                }
+                for future in as_completed(future_to_meta):
+                    block, actual_rule_decision, safety_rule_decision = future_to_meta[future]
+                    final_decision, trace_entry, fallback_reason, qwen_accepted = future.result()
+                    
+                    if trace_entry is not None:
+                        trace_entries.append(trace_entry)
+                        if trace_entry.raw_response is not None or trace_entry.fallback_reason in {"backend_error", "invalid_json", "schema_mismatch"}:
+                            attempted_count += 1
+                    if fallback_reason:
+                        fallback_reasons[fallback_reason] += 1
+                        fallback_count += 1
+
+                    if config.mode == "shadow":
+                        if actual_rule_decision is not None:
+                            _apply_decision_to_block(
+                                block,
+                                actual_rule_decision,
+                                source="rule",
+                                backend_name="heuristic",
+                                config=config,
+                            )
+                            applied_source_counts["rule"] += 1
+                            confidence_values.append(actual_rule_decision.role_confidence)
+                        elif qwen_accepted and final_decision.generic_role != "unknown":
+                            shadow_disagreement_count += 1
+                        if qwen_accepted and actual_rule_decision is not None and trace_entry and trace_entry.parsed_decision is not None:
+                            if (actual_rule_decision.generic_role, actual_rule_decision.domain_role) != (
+                                trace_entry.parsed_decision["generic_role"],
+                                trace_entry.parsed_decision["domain_role"],
+                            ):
+                                shadow_disagreement_count += 1
+                        if progress_bar:
+                            progress_bar.update(1)
+                        continue
+
+                    if qwen_accepted:
+                        accepted_count += 1
+                        source = "qwen"
+                        backend_name_for_block = backend_name_str
+                    else:
+                        source = "safety_rule" if safety_rule_decision is not None else "unknown_fallback"
+                        backend_name_for_block = "heuristic"
+
                     _apply_decision_to_block(
                         block,
-                        actual_rule_decision,
-                        source="rule",
-                        backend_name="heuristic",
+                        final_decision,
+                        source=source,
+                        backend_name=backend_name_for_block,
                         config=config,
+                        fallback_reason=fallback_reason,
                     )
-                    applied_source_counts["rule"] += 1
-                    confidence_values.append(actual_rule_decision.role_confidence)
-                elif qwen_accepted and final_decision.generic_role != "unknown":
-                    shadow_disagreement_count += 1
-                if qwen_accepted and actual_rule_decision is not None and trace_entry and trace_entry.parsed_decision is not None:
-                    if (actual_rule_decision.generic_role, actual_rule_decision.domain_role) != (
-                        trace_entry.parsed_decision["generic_role"],
-                        trace_entry.parsed_decision["domain_role"],
-                    ):
-                        shadow_disagreement_count += 1
-                if progress_bar:
-                    progress_bar.update(1)
-                continue
-
-            if qwen_accepted:
-                accepted_count += 1
-                source = "qwen"
-                backend_name = "qwen_transformers"
-            else:
-                source = "safety_rule" if safety_rule_decision is not None else "unknown_fallback"
-                backend_name = "heuristic"
-
-            _apply_decision_to_block(
-                block,
-                final_decision,
-                source=source,
-                backend_name=backend_name,
-                config=config,
-                fallback_reason=fallback_reason,
-            )
-            applied_source_counts[source] += 1
-            confidence_values.append(final_decision.role_confidence)
-            if progress_bar:
-                progress_bar.update(1)
+                    applied_source_counts[source] += 1
+                    confidence_values.append(final_decision.role_confidence)
+                    if progress_bar:
+                        progress_bar.update(1)
 
         if progress_bar:
             progress_bar.close()

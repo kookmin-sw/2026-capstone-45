@@ -1,11 +1,15 @@
 import argparse
 import json
+from dotenv import load_dotenv
 
 from .generation_pipeline import generate_document
 from .generation_types import GenerationConfig
 from .reference_pipeline import parse_reference
 from .semantic_types import SemanticConfig
 from .visualize import render_reference_visualization
+
+# .env 파일 로드
+load_dotenv()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -17,9 +21,9 @@ def build_parser() -> argparse.ArgumentParser:
     parse_reference_parser.add_argument("--reference", required=True)
     parse_reference_parser.add_argument("--artifacts-root", default="artifacts")
     parse_reference_parser.add_argument("--ocr-results-root", default="OCR_results")
-    parse_reference_parser.add_argument("--semantic-mode", choices=["rule", "qwen", "shadow"], default="rule")
+    parse_reference_parser.add_argument("--semantic-mode", choices=["rule", "qwen", "shadow"], default="qwen")
     parse_reference_parser.add_argument("--semantic-model", default="Qwen/Qwen3.5-9B")
-    parse_reference_parser.add_argument("--semantic-runtime", choices=["transformers"], default="transformers")
+    parse_reference_parser.add_argument("--semantic-runtime", choices=["transformers", "api"], default="api")
     parse_reference_parser.add_argument("--semantic-device", default="auto")
 
     visualize_parser = subparsers.add_parser("visualize-reference", help="Render an HTML visualization for a reference artifact")
@@ -32,9 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     generate_parser.add_argument("--reference-artifact-dir", required=True)
     generate_parser.add_argument("--source-artifact-dir", required=True)
     generate_parser.add_argument("--artifacts-root", default="artifacts")
-    generate_parser.add_argument("--generation-mode", choices=["rule", "qwen"], default="rule")
+    generate_parser.add_argument("--generation-mode", choices=["rule", "qwen"], default="qwen")
     generate_parser.add_argument("--generation-model", default="Qwen/Qwen3.5-9B")
-    generate_parser.add_argument("--generation-runtime", choices=["transformers"], default="transformers")
+    generate_parser.add_argument("--generation-runtime", choices=["transformers", "api"], default="api")
     generate_parser.add_argument("--generation-device", default="auto")
     return parser
 
