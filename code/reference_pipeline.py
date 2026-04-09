@@ -1,10 +1,16 @@
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .adapters import load_dolphin_page, load_paddle_page
 from .archetypes import classify_page, detect_document_family, detect_language_from_pages
 from .fusion import fuse_pages
+from .llm2doc_adapter import (
+    build_llm2doc_page_sources,
+    load_llm2doc_pages,
+    resolve_llm2doc_reference_path,
+    save_llm2doc_artifacts,
+)
 from .ocr_locator import available_preview_paths, locate_reference_pages
 from .semantic import apply_financial_semantic_overlay
 from .semantic_types import SemanticConfig
@@ -69,20 +75,54 @@ def build_reference_template(
     reference_path: str,
     ocr_results_root: str = "OCR_results",
     semantic_config: Optional[SemanticConfig] = None,
-) -> Tuple[ReferenceTemplate, Dict[str, object], List[Dict[str, object]]]:
-    page_sources = locate_reference_pages(reference_path, ocr_results_root)
+    ocr_source: str = "precomputed",
+    llm2doc_root: Optional[str] = None,
+) -> Tuple[ReferenceTemplate, Dict[str, object], List[Dict[str, object]], Dict[str, Any]]:
     fused_pages: List[FusedPage] = []
-    for page_source in page_sources:
-        dolphin_page = load_dolphin_page(page_source)
-        paddle_page = load_paddle_page(page_source)
-        fused_pages.append(
-            fuse_pages(
-                dolphin_page=dolphin_page,
-                paddle_page=paddle_page,
-                page_number=page_source.page_number,
-                sample_id=page_source.sample_id,
+
+    if ocr_source == "precomputed":
+        page_sources = locate_reference_pages(reference_path, ocr_results_root)
+        source_bundle: Dict[str, Any] = {
+            "ocr_source": ocr_source,
+            "resolved_reference_path": str(Path(reference_path).resolve()),
+            "page_sources": page_sources,
+        }
+        for page_source in page_sources:
+            dolphin_page = load_dolphin_page(page_source)
+            paddle_page = load_paddle_page(page_source)
+            fused_pages.append(
+                fuse_pages(
+                    dolphin_page=dolphin_page,
+                    paddle_page=paddle_page,
+                    page_number=page_source.page_number,
+                    sample_id=page_source.sample_id,
+                )
             )
-        )
+    elif ocr_source == "llm2doc":
+        if not llm2doc_root:
+            raise ValueError("llm2doc_root is required when ocr_source='llm2doc'")
+
+        paddle_pages = load_llm2doc_pages(reference_path, llm2doc_root)
+        source_bundle = {
+            "ocr_source": ocr_source,
+            "resolved_reference_path": str(
+                resolve_llm2doc_reference_path(reference_path, llm2doc_root).resolve()
+            ),
+            "page_sources": build_llm2doc_page_sources(reference_path, llm2doc_root, paddle_pages),
+            "llm2doc_pages": paddle_pages,
+        }
+        page_sources = source_bundle["page_sources"]
+        for paddle_page in paddle_pages:
+            fused_pages.append(
+                fuse_pages(
+                    dolphin_page=None,
+                    paddle_page=paddle_page,
+                    page_number=paddle_page.page,
+                    sample_id=paddle_page.sample_id,
+                )
+            )
+    else:
+        raise ValueError(f"unsupported ocr_source: {ocr_source}")
 
     analyses = [classify_page(page) for page in fused_pages]
     document_family = detect_document_family(fused_pages, analyses)
@@ -113,8 +153,8 @@ def build_reference_template(
 
     source_engines = sorted({engine for page in fused_pages for engine in page.source_engines})
     template = ReferenceTemplate(
-        template_id="%s-%s" % (job_id, stable_hash([job_id, str(Path(reference_path).resolve())])),
-        source_path=str(Path(reference_path).resolve()),
+        template_id="%s-%s" % (job_id, stable_hash([job_id, source_bundle["resolved_reference_path"]])),
+        source_path=source_bundle["resolved_reference_path"],
         document_family=document_family,
         language=language,
         source_engines=source_engines,
@@ -133,7 +173,8 @@ def build_reference_template(
     )
 
     diagnostics = {
-        "reference_path": str(Path(reference_path).resolve()),
+        "reference_path": source_bundle["resolved_reference_path"],
+        "ocr_source": ocr_source,
         "page_sources": [dataclass_to_dict(page_source) for page_source in page_sources],
         "page_analyses": [dataclass_to_dict(analysis) for analysis in analyses],
         "fusion": {page.sample_id: page.diagnostics for page in fused_pages},
@@ -161,7 +202,7 @@ def build_reference_template(
                 "blocks": [dataclass_to_dict(block) for block in page.blocks],
             }
         )
-    return template, diagnostics, canonical_pages
+    return template, diagnostics, canonical_pages, source_bundle
 
 
 def parse_reference(
@@ -170,12 +211,16 @@ def parse_reference(
     artifacts_root: str = "artifacts",
     ocr_results_root: str = "OCR_results",
     semantic_config: Optional[SemanticConfig] = None,
+    ocr_source: str = "precomputed",
+    llm2doc_root: Optional[str] = None,
 ) -> Dict[str, str]:
-    template, diagnostics, canonical_pages = build_reference_template(
+    template, diagnostics, canonical_pages, source_bundle = build_reference_template(
         job_id=job_id,
         reference_path=reference_path,
         ocr_results_root=ocr_results_root,
         semantic_config=semantic_config,
+        ocr_source=ocr_source,
+        llm2doc_root=llm2doc_root,
     )
     artifact_dir = Path(artifacts_root) / job_id / "01_reference"
     raw_dolphin_dir = ensure_dir(artifact_dir / "raw" / "dolphin")
@@ -221,18 +266,23 @@ def parse_reference(
     if semantic_trace is not None:
         save_json(semantic_trace_path, semantic_trace)
 
-    for page_source in locate_reference_pages(reference_path, ocr_results_root):
-        if page_source.dolphin_json_path:
-            _copy_if_exists(page_source.dolphin_json_path, raw_dolphin_dir / Path(page_source.dolphin_json_path).name)
-        if page_source.dolphin_markdown_path:
-            _copy_if_exists(page_source.dolphin_markdown_path, raw_dolphin_dir / Path(page_source.dolphin_markdown_path).name)
-        if page_source.paddle_json_path:
-            _copy_if_exists(page_source.paddle_json_path, raw_paddle_dir / ("%s.json" % page_source.sample_id))
-        if page_source.paddle_markdown_path:
-            _copy_if_exists(page_source.paddle_markdown_path, raw_paddle_dir / ("%s.md" % page_source.sample_id))
-        for preview_name, preview_path in available_preview_paths(page_source).items():
-            suffix = Path(preview_path).suffix
-            _copy_if_exists(preview_path, preview_dir / ("%s_%s%s" % (page_source.sample_id, preview_name, suffix)))
+    if source_bundle["ocr_source"] == "precomputed":
+        for page_source in source_bundle["page_sources"]:
+            if page_source.dolphin_json_path:
+                _copy_if_exists(page_source.dolphin_json_path, raw_dolphin_dir / Path(page_source.dolphin_json_path).name)
+            if page_source.dolphin_markdown_path:
+                _copy_if_exists(page_source.dolphin_markdown_path, raw_dolphin_dir / Path(page_source.dolphin_markdown_path).name)
+            if page_source.paddle_json_path:
+                _copy_if_exists(page_source.paddle_json_path, raw_paddle_dir / ("%s.json" % page_source.sample_id))
+            if page_source.paddle_markdown_path:
+                _copy_if_exists(page_source.paddle_markdown_path, raw_paddle_dir / ("%s.md" % page_source.sample_id))
+            for preview_name, preview_path in available_preview_paths(page_source).items():
+                suffix = Path(preview_path).suffix
+                _copy_if_exists(preview_path, preview_dir / ("%s_%s%s" % (page_source.sample_id, preview_name, suffix)))
+    elif source_bundle["ocr_source"] == "llm2doc":
+        save_llm2doc_artifacts(source_bundle["llm2doc_pages"], artifact_dir)
+    else:
+        raise ValueError(f"unsupported ocr_source: {source_bundle['ocr_source']}")
 
     result = {
         "reference_template": str(template_path),

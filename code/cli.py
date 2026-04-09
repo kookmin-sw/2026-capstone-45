@@ -20,7 +20,9 @@ def build_parser() -> argparse.ArgumentParser:
     parse_reference_parser.add_argument("--job-id", required=True)
     parse_reference_parser.add_argument("--reference", required=True)
     parse_reference_parser.add_argument("--artifacts-root", default="artifacts")
+    parse_reference_parser.add_argument("--ocr-source", choices=["precomputed", "llm2doc"], default="precomputed")
     parse_reference_parser.add_argument("--ocr-results-root", default="OCR_results")
+    parse_reference_parser.add_argument("--llm2doc-root", default="llm-to-document")
     parse_reference_parser.add_argument("--semantic-mode", choices=["rule", "qwen", "shadow"], default="qwen")
     parse_reference_parser.add_argument("--semantic-model", default="Qwen/Qwen3.5-9B")
     parse_reference_parser.add_argument("--semantic-runtime", choices=["transformers", "api"], default="api")
@@ -57,7 +59,9 @@ def main() -> int:
             job_id=args.job_id,
             reference_path=args.reference,
             artifacts_root=args.artifacts_root,
+            ocr_source=args.ocr_source,
             ocr_results_root=args.ocr_results_root,
+            llm2doc_root=args.llm2doc_root,
             semantic_config=semantic_config,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
