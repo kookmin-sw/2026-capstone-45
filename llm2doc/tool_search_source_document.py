@@ -78,13 +78,9 @@ class ToolSearchSourceDocument:
 
         self.chroma = chromadb.RustClient(path="debug_chromadb_cache")
         try:
-            self.collection = self.chroma.get_collection(
-                name="docs_v1", embedding_function=embedding_function
-            )
+            self.collection = self.chroma.get_collection(name="docs_v1", embedding_function=embedding_function)
         except chromadb.errors.NotFoundError:
-            self.collection = self.chroma.create_collection(
-                name="docs_v1", embedding_function=embedding_function
-            )
+            self.collection = self.chroma.create_collection(name="docs_v1", embedding_function=embedding_function)
             make_collection(self.collection, layout_analyzer)
 
         layout_analyzer.dispose()
@@ -125,13 +121,9 @@ class ToolSearchSourceDocument:
             parsed_page = self.parsed_docs[doc].pages[page]
             parsed_block = parsed_page.blocks[block]
 
+            output.append(f"Match #{i + 1}: document_id={doc}, page_id={page + 1}, block_id={block + 1}")
             output.append(
-                f"Match #{i + 1}: document_id={doc}, page_id={page + 1}, block_id={block + 1}"
-            )
-            output.append(
-                parsed_block.to_structured_html(
-                    parsed_page, block_id=f"{doc}-page-{page + 1}-block-{block + 1}"
-                )
+                parsed_block.to_structured_html(parsed_page, block_id=f"{doc}-page-{page + 1}-block-{block + 1}")
             )
             output.append("")
 

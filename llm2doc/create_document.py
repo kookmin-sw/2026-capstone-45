@@ -186,9 +186,7 @@ def write_document(
         input += response.output  # type: ignore
 
         tool_calls = [
-            item
-            for item in response.output
-            if item.type == "function_call" and item.call_id not in fulfiled_tool_calls
+            item for item in response.output if item.type == "function_call" and item.call_id not in fulfiled_tool_calls
         ]
         if len(tool_calls) == 0:
             break
@@ -256,23 +254,15 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
     target_doc_image_names = os.listdir(f"data/{target_doc}/")
     target_doc_image_names.sort()
     target_doc_images = [
-        Image.open(f"data/{target_doc}/{x}")
-        for x in target_doc_image_names
-        if x.startswith("original")
+        Image.open(f"data/{target_doc}/{x}") for x in target_doc_image_names if x.startswith("original")
     ]
 
-    imagine = write_document(
-        client, query, src_docs_parsed, target_doc_parsed
-    )
+    imagine = write_document(client, query, src_docs_parsed, target_doc_parsed)
 
     # 작성한 문서를 렌더링함
     bboxes = [[y.bbox for y in x.blocks] for x in target_doc_parsed.pages]
-    texts = [
-        [cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages
-    ]
-    htmls = [
-        [cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages
-    ]
+    texts = [[cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages]
+    htmls = [[cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages]
 
     soup = BeautifulSoup(imagine.strip(), "lxml")
     document = soup.find("document")

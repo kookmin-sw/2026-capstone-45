@@ -50,9 +50,7 @@ def _create_html2image_instance():
         pass
 
     try:
-        return Html2Image(
-            browser="edge", temp_path=tempdir, output_path=tempdir, disable_logging=True
-        )
+        return Html2Image(browser="edge", temp_path=tempdir, output_path=tempdir, disable_logging=True)
     except FileNotFoundError:
         pass
 
@@ -89,9 +87,7 @@ def render_single_text(
     box_width = int(abs_width)
     box_height = int(abs_height)
 
-    def create_paragraph(
-        text_content: str, font_size: float
-    ) -> skia.textlayout.Paragraph:
+    def create_paragraph(text_content: str, font_size: float) -> skia.textlayout.Paragraph:
         para_style = skia.textlayout.ParagraphStyle()
         text_style = skia.textlayout.TextStyle()
         text_style.setColor(text_color)
@@ -376,9 +372,7 @@ def erase_bounding_box(image: Image.Image, bbox: list) -> Image.Image:
 
 
 @beartype
-def _extend_bounding_box(
-    image: Image.Image, bbox: Sequence[int | float]
-) -> list[int | float]:
+def _extend_bounding_box(image: Image.Image, bbox: Sequence[int | float]) -> list[int | float]:
     """
     Extends the bounding box to the right as long as the right border is a uniform color.
     Terminates if any pixel on the right border differs in color (even before extending),
