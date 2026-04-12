@@ -62,7 +62,7 @@ class ToolSearchSourceDocument:
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The query for the document in form of question in natural language.",
+                        "description": "The query for the document structured as an question.",
                     },
                 },
                 "required": ["query"],
