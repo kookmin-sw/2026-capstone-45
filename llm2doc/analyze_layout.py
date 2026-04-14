@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from typing import Any, cast, Sequence
 from beartype import beartype
 from PIL import Image
+from threading import Lock
+from concurrent.futures import ThreadPoolExecutor, Future
 from paddleocr import PaddleOCRVL, TextDetection
 from paddlex.inference.pipelines.paddleocr_vl.result import (
     PaddleOCRVLResult,
@@ -102,6 +104,9 @@ class BlockStyle:
     4: 사각형을 만드는 점 개수
     2: x, y값
     """
+
+    line_count: int
+    """ 줄 개수 """
 
     line_height: float
     """ 원본 이미지 크기 기준 픽셀 단위 """
@@ -210,11 +215,12 @@ class ParsedPage:
         texts = []
 
         for block in self.blocks:
-            if not block.is_text:
-                continue
-
             bboxes.append(block.bbox)
-            texts.append(block.content.strip())
+
+            if block.is_text:
+                texts.append(block.content.strip())
+            else:
+                texts.append(f"[{block.label}]")
 
         return render_boxes(reconstructed_img, bboxes=bboxes, selected=-1, text=texts)
 
@@ -381,51 +387,62 @@ class LayoutAnalyzer:
 @beartype
 class LayoutStyleAnalyzer:
     def __init__(self):
+        self.ocr_lock = Lock()
         self.ocr: TextDetection | None = None
         self.font = FontAnalyzer()
 
     def load_model(self):
         self.ocr = TextDetection(
             model_name="PP-OCRv5_server_det",
-            box_thresh=0.5,
+            box_thresh=0.2,
         )
 
     def __call__(self, block: BlockInfo, block_img: np.ndarray) -> BlockStyle | None:
-        if not block.is_text:
+        if block.is_image:
             return None
 
-        if self.ocr is None:
-            self.load_model()
-            assert self.ocr is not None
+        with self.ocr_lock:
+            if self.ocr is None:
+                self.load_model()
+                assert self.ocr is not None
 
-        assert block_img.dtype == np.uint8 and block_img.shape[-1] == 3
-        H, W, C = block_img.shape
+            assert block_img.dtype == np.uint8 and block_img.shape[-1] == 3
+            H, W, C = block_img.shape
 
-        result = self.ocr.predict(block_img)[0]
+            result = self.ocr.predict(block_img)[0]
+
         result = validate_type(result, TextDetResult)
 
         dt_polys = np.asarray(result["dt_polys"], dtype=np.int32)
         dt_scores = np.asarray(result["dt_scores"], dtype=np.int32)
 
         if dt_polys.size == 0:
-            dt_polys = np.zeros((0, 4, 2), dtype=np.int32)
-            dt_scores = np.zeros((0,), dtype=np.int32)
+            print("[WARN] 텍스트를 인식하지 못함")
+            return None
 
-        lines = self._extract_lines(block_img, dt_polys, dt_scores)
+        lines = self._extract_lines(dt_polys, dt_scores)
+        line_count = len(lines)
         line_height = float(self._estimate_line_height(block_img, lines))
 
-        self._align_characters(block, block_img, lines)
+        result = self._align_characters(block, block_img, lines)
+        if result is None:
+            font_family = "sans-serif"
+            color = "#000000"
+        else:
+            font_family, color = result
+
+        font_size = line_height / 1.2
 
         return BlockStyle(
             line_boxes=dt_polys.astype(np.int32),
+            line_count=line_count,
             line_height=line_height,
+            font_size=font_size,
+            font_family=font_family,
+            color=color,
         )
 
-    def _extract_lines(self, block_img: np.ndarray, dt_polys: np.ndarray, dt_scores: np.ndarray):
-        if len(dt_polys) == 0:
-            # 글자 크기를 추정하지 못하면 박스 높이 반환
-            return block_img.shape[0]
-
+    def _extract_lines(self, dt_polys: np.ndarray, dt_scores: np.ndarray):
         dt_polys_ind = np.argsort(np.min(dt_polys[:, :, 1], axis=1))
         dt_polys = dt_polys[dt_polys_ind]
         dt_scores = dt_scores[dt_polys_ind]
@@ -556,10 +573,12 @@ class LayoutStyleAnalyzer:
         font_colors **= 2.2
         font_color = np.mean(font_colors, axis=0)
         font_color = (font_color ** (1 / 2.2)).astype(np.uint8)
+        color_r, color_g, color_b = map(int, font_color)
+        color = f"#{color_r:02x}{color_g:02x}{color_b:02x}"
 
         font_family = FontAnalysisResult.merge_prediction(font_families).best_font()
 
-        raise RuntimeError("저거 정리해서 리턴하기")
+        return font_family, color
 
     def dispose(self):
         self.ocr = None
@@ -582,25 +601,43 @@ def populate_cache(clear_all: bool = False):
 
     with LayoutAnalyzer() as layout_analyzer:
         for doc in os.listdir("data"):
+            if doc != "financial2":
+                continue
             if os.path.isdir(f"data/{doc}"):
                 documents.append(layout_analyzer(doc))
 
+    num_cpu = os.cpu_count() or 4
+
     with LayoutStyleAnalyzer() as layout_style_analyzer:
-        for doc in documents[2:]:
-            for page in doc.pages:
-                page_img = np.asarray(page.screenshot.convert("RGB"))
+        with ThreadPoolExecutor(max_workers=num_cpu) as exe:
+            for doc in documents[2:]:
+                style_futures = cast(list[Future[BlockStyle | None]], [])
 
-                for block in page.blocks:
-                    xmin, ymin, xmax, ymax = block.bbox
+                for page in doc.pages:
+                    page_img = np.asarray(page.screenshot.convert("RGB"))
 
-                    # Padding
-                    xmin = max(xmin - 8, 0)
-                    ymin = max(ymin - 8, 0)
-                    xmax = min(xmax + 8, page_img.shape[1])
-                    ymax = min(ymax + 8, page_img.shape[0])
+                    for block in page.blocks:
+                        xmin, ymin, xmax, ymax = block.bbox
 
-                    block_img = page_img[ymin:ymax, xmin:xmax]
-                    style = layout_style_analyzer(block, block_img)
-                    block.style = style
+                        # Padding
+                        xmin = max(xmin - 8, 0)
+                        ymin = max(ymin - 8, 0)
+                        xmax = min(xmax + 8, page_img.shape[1])
+                        ymax = min(ymax + 8, page_img.shape[0])
 
-            doc.save_as_cache()
+                        block_img = page_img[ymin:ymax, xmin:xmax]
+                        style_futures.append(exe.submit(layout_style_analyzer, block, block_img))
+
+                style_futures_iter = iter(style_futures)
+
+                for page in doc.pages:
+                    for block in page.blocks:
+                        try:
+                            block.style = next(style_futures_iter).result()
+                        except StopIteration:
+                            raise RuntimeError("length of style_futures is inconsistent")
+                        except KeyboardInterrupt:
+                            exe.shutdown(wait=False, cancel_futures=True)
+                            raise
+
+                doc.save_as_cache()

@@ -10,9 +10,13 @@ import skia
 
 from PIL import Image, ImageDraw
 from beartype import beartype
-from typing import Sequence, cast
+from typing import Sequence, cast, TYPE_CHECKING
+from rich.progress import track
 from html2image import Html2Image
 from concurrent.futures import Future, ThreadPoolExecutor
+
+if TYPE_CHECKING:
+    import llm2doc.analyze_layout
 
 
 COLOR_PRIOR = "green"
@@ -154,10 +158,13 @@ def _render_html_fragment(
     box_width: int,
     box_height: int,
     bg_color: str,
-    line_height: float,
+    block_info: "llm2doc.analyze_layout.BlockInfo",
 ) -> Image.Image | None:
     if box_width <= 0 or box_height <= 0:
         return None
+
+    style = block_info.style
+    assert style is not None
 
     styled_html = f"""
     <html>
@@ -166,7 +173,8 @@ def _render_html_fragment(
             body {{
                 overflow: hidden;
                 background-color: #{bg_color};
-                font-size: {line_height:.4f}px;
+                font-size: {style.font_size:.4f}px;
+                line-height: {style.line_height}px;
                 width: {box_width}px;
                 height: {box_height}px;
                 min-width: {box_width}px;
@@ -188,6 +196,10 @@ def _render_html_fragment(
             }}
             table {{
                 width: 100%;
+            }}
+            table, th, td {{
+                border: 1px solid black;
+                border-collapse: collapse;
             }}
         </style>
     </head>
@@ -218,7 +230,7 @@ def _draw_html(
     image: Image.Image,
     bboxes: Sequence[Sequence[int | float]],
     html: Sequence[str | None],
-    line_height: Sequence[float],
+    block_info: Sequence["llm2doc.analyze_layout.BlockInfo"],
 ) -> Image.Image:
     if len(bboxes) < len(html):
         raise IndexError("length of html_fragments exceeds length of bboxes")
@@ -226,7 +238,8 @@ def _draw_html(
     rgb_image = image.convert("RGB")
     img_arr = np.array(rgb_image)
 
-    cpu_count = os.cpu_count() or 4
+    cpu_count = os.cpu_count() or 1
+    cpu_count *= 16
     tasks = cast(list[tuple[Future, int, int]], [])
 
     with ThreadPoolExecutor(max_workers=cpu_count, initializer=_init_thread) as exe:
@@ -252,12 +265,12 @@ def _draw_html(
                 box_width,
                 box_height,
                 bg_color,
-                line_height[i],
+                block_info[i],
             )
 
             tasks.append((future, x_min, y_min))
 
-        for i, (future, x_min, y_min) in enumerate(tasks):
+        for i, (future, x_min, y_min) in enumerate(track(tasks, description="Rendering HTML...")):
             html_image = future.result()
 
             if html_image is not None:
@@ -425,7 +438,7 @@ def render_boxes(
     bboxes: Sequence[Sequence[int | float]],
     text: Sequence[str | None] | None = None,
     html: Sequence[str | None] | None = None,
-    line_height: Sequence[float] | None = None,
+    block_info: Sequence["llm2doc.analyze_layout.BlockInfo"] | None = None,
     selected: int | None = None,
 ):
     image = image.convert("RGBA")
@@ -458,7 +471,7 @@ def render_boxes(
                 image = render_single_text(image, bbox, t)
 
     if html is not None:
-        assert line_height is not None
-        image = _draw_html(image, bboxes, html, line_height)
+        assert block_info is not None
+        image = _draw_html(image, bboxes, html, block_info)
 
     return image

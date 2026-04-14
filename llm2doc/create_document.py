@@ -64,6 +64,35 @@ This can be vague, and if so, you need to figure out what to write given the doc
 *Source* documents are what the user gave us as the source materials. Each source document will have a unique identifier (e.g., id="1").
 You need to decide if each source documents are relevant to the user query individually.
 
+Each input is wrapped inside <document>...</document> tag.
+Each div block is positioned on the page via attribute `data-bbox`.
+It has format of [xmin, ymin, xmax, ymax] in 0-1000 relative scale.
+Each page has independent coordinates.
+
+## Stylesheet
+While the input is not a complete HTML document (and should be not treated as such), here is the basic stylesheet for the document.
+
+```css
+document > page > div {{
+  position: absolute;  /* Position and size is derived from the attribute `data-bbox` */
+
+  /* Value below are autodetected from OCR result */
+  line-height: (auto)px;
+  font-family: (auto);
+  font-size: (auto)px;
+  color: (auto);
+  background-color: (auto);
+}}
+
+document > page > div > p {{
+  white-space: pre-wrap;
+}}
+
+table {{
+  width: 100%;
+}}
+```
+
 # Output format
 Write the new document as a single HTML-ish document, in same style and layout of *target* document.
 You may use images present in any (source or target) document.
@@ -86,29 +115,7 @@ Examples include:
 * 'text-align' to center the text.
 * Flexbox to vertically center the text or table.
 
-# Actual input
-Now this is the end of the guide.
-Here is the actual input. Each input is wrapped inside <document>...</document> tag.
-
-Each div block is positioned on the page via attribute `data-bbox`. It has format of [xmin, ymin, xmax, ymax] in 0-1000 relative scale. Each page has independent coordinates.
-
-## Stylesheet
-While the text below is not a complete HTML document (and should be not treated as such), here is the basic stylesheet for the document.
-
-```css
-document > page > div {{
-  position: absolute;  /* Position and size is derived from the attribute `data-bbox` */
-}}
-
-document > page > div > p {{
-  white-space: pre-wrap;
-}}
-
-table {{
-  width: 100%;
-}}
-```
-
+# The input
 ## User query
 <query>
 {query}
@@ -257,7 +264,9 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
         Image.open(f"data/{target_doc}/{x}") for x in target_doc_image_names if x.startswith("original")
     ]
 
-    imagine = write_document(client, query, src_docs_parsed, target_doc_parsed)
+    # imagine = write_document(client, query, src_docs_parsed, target_doc_parsed)
+    with open("debug_write_output.txt", "rt", encoding="utf-8") as f:
+        imagine = f.read()
 
     # 작성한 문서를 렌더링함
     bboxes = [[y.bbox for y in x.blocks] for x in target_doc_parsed.pages]
@@ -310,7 +319,7 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
             bboxes[i],
             texts[i],
             htmls[i],
-            [x.line_height for x in target_doc_parsed.pages[i].blocks],
+            target_doc_parsed.pages[i].blocks,
         )
 
         img.save(f"debug_finish_{i + 1}.png")
