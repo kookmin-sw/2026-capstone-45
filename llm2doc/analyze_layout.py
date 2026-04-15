@@ -81,39 +81,6 @@ def _show_image(
         cv2.destroyWindow("bbox")
 
 
-def _detect_single_character(image: np.ndarray, min_confidence: float):
-    data = pytesseract.image_to_data(image, lang="kor+eng", config="--psm 7 --oem 1")
-    data = unicodedata.normalize("NFC", data.strip())
-
-    best_confidence = -1
-    best_ch = ""
-
-    for line in data.split("\n")[1:]:
-        line = line.strip()
-        if len(line) == 0:
-            continue
-
-        line = line + "\t"
-
-        level, page_num, block_num, par_num, line_num, word_num, left, top, width, height, conf, text = line.split(
-            "\t", maxsplit=11
-        )
-
-        text = text.strip()
-        conf = float(conf)
-
-        if conf < min_confidence or conf <= best_confidence:
-            continue
-
-        best_confidence = conf
-        best_ch = text
-
-    if len(best_ch) != 1:
-        return -1, ""
-
-    return best_confidence, best_ch
-
-
 def _slice_img(img: np.ndarray, bbox: np.ndarray | Sequence[int]):
     xmin, ymin, xmax, ymax = bbox
     return img[ymin : ymax + 1, xmin : xmax + 1]
@@ -287,7 +254,7 @@ def _segment_single_char(img_mask: np.ndarray, real_text: str, exe: Executor):
 
     processed: set[tuple[int, ...]] = set()
     bboxes = cast(list[np.ndarray], [])
-    futures = cast(list[Future[tuple[float, str]]], [])
+    futures = cast(list[Future[str]], [])
 
     for i, begin in enumerate(x_bars[:-1]):
         for end in x_bars[i + 1 :]:
@@ -314,10 +281,12 @@ def _segment_single_char(img_mask: np.ndarray, real_text: str, exe: Executor):
             if np.min(segment) == 255:
                 continue
 
-            segment = np.pad(segment, [[0, 0], [8, 8]], constant_values=255)
+            segment = np.pad(segment, [[8, 8], [8, 8]], constant_values=255)
 
             bboxes.append(bbox)
-            futures.append(exe.submit(lambda x: _detect_single_character(x, 70), segment))
+            futures.append(
+                exe.submit(lambda x: pytesseract.image_to_string(x, lang="kor+eng", config="--psm 10 --oem 1"), segment)
+            )
 
     pred_text = pred_text.result()
     pred_text = unicodedata.normalize("NFC", pred_text).strip()
@@ -325,36 +294,35 @@ def _segment_single_char(img_mask: np.ndarray, real_text: str, exe: Executor):
     begin, end = _slice_source_text(real_text, pred_text)
     full_text = real_text[begin:end].strip()
 
-    candidates: list[tuple[np.ndarray, str, float]] = []
+    candidates: list[tuple[np.ndarray, str]] = []
     for bbox, future in zip(bboxes, futures):
-        conf, ch = future.result()
+        data = future.result()
+        data = unicodedata.normalize("NFC", data).strip()
 
-        if conf < 0:
+        # 1글자짜리 텍스트만 남김
+        if len(data) != 1:
             continue
 
-        candidates.append((bbox, ch, conf))
+        candidates.append((bbox, data))
 
     candidates.sort(key=lambda x: x[0][2])
-    candidates.insert(0, (np.asarray([-1, -1, -1, -1], dtype=np.int32), "", 0.0))
+    candidates.insert(0, (np.asarray([-1, -1, -1, -1], dtype=np.int32), ""))
+
+    # 이 아래 코드는 AI로 생성했음.
 
     M = len(candidates)
     N = len(full_text)
 
-    # DP tables: separate arrays for the primary goal (length) and secondary goal (confidence)
-    dp_len = np.full((M, N + 1), -1, dtype=int)
-    dp_conf = np.full((M, N + 1), -1.0, dtype=float)
+    # dp[i][j]: max matched length ending exactly at candidate i, consuming j chars of full_text
+    dp = np.full((M, N + 1), -1, dtype=int)
 
-    # Running maximums
-    max_dp_len = np.full((M, N + 1), -1, dtype=int)
-    max_dp_conf = np.full((M, N + 1), -1.0, dtype=float)
-
+    # Running maximums to accelerate predecessor lookup from O(M^2) to O(M)
+    max_dp = np.full((M, N + 1), -1, dtype=int)
     max_back = np.full((M, N + 1), -1, dtype=int)
     backtrack: list[list[tuple[int, int] | None]] = [[None] * (N + 1) for _ in range(M)]
 
-    dp_len[0][0] = 0
-    dp_conf[0][0] = 0.0
-    max_dp_len[0][0] = 0
-    max_dp_conf[0][0] = 0.0
+    dp[0][0] = 0
+    max_dp[0][0] = 0
     max_back[0][0] = 0
 
     def match_subseq(s: str, t: str, start: int) -> int:
@@ -367,7 +335,7 @@ def _segment_single_char(img_mask: np.ndarray, real_text: str, exe: Executor):
         return curr
 
     for i in range(1, M):
-        cand_bbox, cand_text, cand_conf = candidates[i]
+        cand_bbox, cand_text = candidates[i]
         cand_xmin = cand_bbox[0]
         cand_len = len(cand_text)
 
@@ -380,70 +348,41 @@ def _segment_single_char(img_mask: np.ndarray, real_text: str, exe: Executor):
 
         if max_p != -1:
             for k in range(N + 1):
-                best_prev_len = max_dp_len[max_p][k]
+                best_prev_len = max_dp[max_p][k]
                 if best_prev_len != -1:
                     j = match_subseq(cand_text, full_text, k)
                     if j != -1:
                         new_len = best_prev_len + cand_len
-                        new_conf = max_dp_conf[max_p][k] + cand_conf
-
-                        # Two-tier check: Maximize Length -> then Maximize Confidence
-                        is_better = False
-                        if new_len > dp_len[i][j]:
-                            is_better = True
-                        elif new_len == dp_len[i][j] and new_conf > dp_conf[i][j]:
-                            is_better = True
-
-                        if is_better:
-                            dp_len[i][j] = new_len
-                            dp_conf[i][j] = new_conf
+                        if new_len > dp[i][j]:
+                            dp[i][j] = new_len
                             backtrack[i][j] = (max_back[max_p][k], k)
 
         # Update running maximums for the next iterations
         for j in range(N + 1):
-            is_max_better = False
-            if dp_len[i][j] > max_dp_len[i - 1][j]:
-                is_max_better = True
-            elif dp_len[i][j] == max_dp_len[i - 1][j] and dp_conf[i][j] > max_dp_conf[i - 1][j]:
-                is_max_better = True
-
-            if is_max_better:
-                max_dp_len[i][j] = dp_len[i][j]
-                max_dp_conf[i][j] = dp_conf[i][j]
+            if dp[i][j] > max_dp[i - 1][j]:
+                max_dp[i][j] = dp[i][j]
                 max_back[i][j] = i
             else:
-                max_dp_len[i][j] = max_dp_len[i - 1][j]
-                max_dp_conf[i][j] = max_dp_conf[i - 1][j]
+                max_dp[i][j] = max_dp[i - 1][j]
                 max_back[i][j] = max_back[i - 1][j]
 
-    # Find the sequence that yielded the maximum matched characters and highest confidence
+    # Find the sequence that yielded the maximum matched characters
     best_i, best_j = -1, -1
-    max_matched_len = -1
-    max_matched_conf = -1.0
-
+    max_matched = -1
     for i in range(M):
         for j in range(N + 1):
-            is_best = False
-            if dp_len[i][j] > max_matched_len:
-                is_best = True
-            elif dp_len[i][j] == max_matched_len and max_matched_len != -1:
-                if dp_conf[i][j] > max_matched_conf:
-                    is_best = True
-                elif dp_conf[i][j] == max_matched_conf:
-                    # Tertiary tie-breaker: prefer matches that finish earlier in full_text
-                    if j < best_j:
-                        is_best = True
-
-            if is_best:
-                max_matched_len = dp_len[i][j]
-                max_matched_conf = dp_conf[i][j]
+            if dp[i][j] > max_matched:
+                max_matched = dp[i][j]
                 best_i, best_j = i, j
+            elif dp[i][j] == max_matched and max_matched != -1:
+                if j < best_j:  # Tie-breaker: prefer matches that finish earlier in full_text
+                    best_i, best_j = i, j
 
     final_bboxes: list[np.ndarray] = []
     final_texts: list[str] = []
 
     # Backtrack to reconstruct the optimal sequence
-    if max_matched_len > 0:
+    if max_matched > 0:
         curr_i, curr_j = best_i, best_j
         while curr_i != 0:
             prev_i, prev_j = backtrack[curr_i][curr_j]  # type: ignore
