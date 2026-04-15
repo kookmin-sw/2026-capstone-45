@@ -26,7 +26,8 @@ from tesserocr import PyTessBaseAPI, OEM, PSM, RIL
 from .util import validate_type
 from .render_image import render_boxes
 from .font_analyzer import FontAnalyzer, FontAnalysisResult
-from .tesseract import download_tessdata
+from .tesseract import download_tessdata, TesseractFleet
+from .dummy_executor import DummyExecutor
 
 
 REGEX_NEWLINE = re.compile(r"[\r\n]+")
@@ -123,14 +124,15 @@ def _fit_bbox_by_connected(img: np.ndarray, bbox: np.ndarray | Sequence):
     return np.array([new_xmin, new_ymin, new_xmax, new_ymax], dtype=np.int32)
 
 
-def _propose_character_segment(img_mask: np.ndarray, tess_line: PyTessBaseAPI) -> list[int]:
+def _propose_character_segment(img_mask: np.ndarray, tess_line: TesseractFleet) -> list[int]:
     """X좌표의 목록을 리턴함"""
 
     PIX_BG = 255
     H, W = img_mask.shape
 
-    tess_line.SetImage(Image.fromarray(img_mask))
-    boxes = tess_line.GetComponentImages(RIL.SYMBOL, True)
+    with tess_line.access() as tess:
+        tess.SetImage(Image.fromarray(img_mask))
+        boxes = tess.GetComponentImages(RIL.SYMBOL, True)
 
     coords = cast(list[int], [])
 
@@ -232,7 +234,9 @@ def _slice_source_text(gt_text: str, pred_text: str) -> tuple[int, int]:
     return best_start, best_end
 
 
-def _segment_single_char(img_mask: np.ndarray, real_text: str, tess_line: PyTessBaseAPI, tess_char: PyTessBaseAPI):
+def _segment_single_char(
+    img_mask: np.ndarray, real_text: str, exe: Executor, tess_line: TesseractFleet, tess_char: TesseractFleet
+):
     MIN_RATIO = 0.1
     MAX_RATIO = 2
     H, W = img_mask.shape
@@ -242,15 +246,23 @@ def _segment_single_char(img_mask: np.ndarray, real_text: str, tess_line: PyTess
 
     img_mask_padded = np.pad(img_mask, [[8, 8], [0, 0]], constant_values=255)
 
-    tess_line.SetImage(Image.fromarray(img_mask_padded))
-    pred_text_raw = tess_line.GetUTF8Text()
-    pred_text = unicodedata.normalize("NFC", pred_text_raw).strip()
+    def process_line(img: np.ndarray):
+        with tess_line.access() as tess:
+            tess.SetImage(Image.fromarray(img))
+            return tess.GetUTF8Text()
+
+    def process_char(img: np.ndarray):
+        with tess_char.access() as tess:
+            tess.SetImage(Image.fromarray(img))
+            return tess.GetUTF8Text()
+
+    pred_text_future = exe.submit(process_line, img_mask_padded)
 
     x_bars = _propose_character_segment(img_mask_padded, tess_line)
 
     processed: set[tuple[int, ...]] = set()
     bboxes = cast(list[np.ndarray], [])
-    char_texts = cast(list[str], [])
+    char_texts = cast(list[Future[str]], [])
 
     for i, begin in enumerate(x_bars[:-1]):
         for end in x_bars[i + 1 :]:
@@ -280,15 +292,18 @@ def _segment_single_char(img_mask: np.ndarray, real_text: str, tess_line: PyTess
             segment = np.pad(segment, [[8, 8], [8, 8]], constant_values=255)
 
             bboxes.append(bbox)
-            tess_char.SetImage(Image.fromarray(segment))
-            char_texts.append(tess_char.GetUTF8Text())
+
+            future = exe.submit(process_char, segment)
+            char_texts.append(future)
+
+    pred_text = unicodedata.normalize("NFC", pred_text_future.result()).strip()
 
     begin, end = _slice_source_text(real_text, pred_text)
     full_text = real_text[begin:end].strip()
 
     candidates: list[tuple[np.ndarray, str]] = []
     for bbox, data in zip(bboxes, char_texts):
-        data = unicodedata.normalize("NFC", data).strip()
+        data = unicodedata.normalize("NFC", data.result()).strip()
 
         # 1글자짜리 텍스트만 남김
         if len(data) != 1:
@@ -713,8 +728,8 @@ class LayoutStyleAnalyzer:
         self.font = FontAnalyzer()
 
         download_tessdata()
-        self.tesseract_line = PyTessBaseAPI(path="./tessdata", lang="eng+kor", oem=OEM.DEFAULT, psm=PSM.SINGLE_LINE)
-        self.tesseract_char = PyTessBaseAPI(path="./tessdata", lang="eng+kor", oem=OEM.DEFAULT, psm=PSM.SINGLE_CHAR)
+        self.tesseract_line = TesseractFleet(path="./tessdata", lang="eng+kor", oem=OEM.DEFAULT, psm=PSM.SINGLE_LINE)
+        self.tesseract_char = TesseractFleet(path="./tessdata", lang="eng+kor", oem=OEM.DEFAULT, psm=PSM.SINGLE_CHAR)
 
     def load_model(self):
         self.ocr = TextDetection(
@@ -722,7 +737,7 @@ class LayoutStyleAnalyzer:
             box_thresh=0.2,
         )
 
-    def __call__(self, block: BlockInfo, block_img: np.ndarray, exe: ThreadPoolExecutor) -> BlockStyle | None:
+    def __call__(self, block: BlockInfo, block_img: np.ndarray, exe: Executor) -> BlockStyle | None:
         if block.is_image:
             return None
 
@@ -837,7 +852,9 @@ class LayoutStyleAnalyzer:
 
                 # TODO: Tesseract 호출 전에 높이를 20~60px로 맞추기
 
-                detections = _segment_single_char(segment_mask, block.content, self.tesseract_line, self.tesseract_char)
+                detections = _segment_single_char(
+                    segment_mask, block.content, exe, self.tesseract_line, self.tesseract_char
+                )
 
                 for bbox, ch in detections:
                     mask = _slice_img(segment_mask, bbox)
@@ -876,9 +893,13 @@ class LayoutStyleAnalyzer:
             paddle.device.cuda.empty_cache()
 
     def __enter__(self):
+        self.tesseract_char.__enter__()
+        self.tesseract_line.__enter__()
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        self.tesseract_char.__exit__(exc_type, exc, tb)
+        self.tesseract_line.__exit__(exc_type, exc, tb)
         self.dispose()
 
 
@@ -893,8 +914,10 @@ def populate_cache(clear_all: bool = False):
             if os.path.isdir(f"data/{doc}"):
                 documents.append(layout_analyzer(doc))
 
+    cpu_count = os.cpu_count() or 4
+
     with LayoutStyleAnalyzer() as layout_style_analyzer:
-        with ThreadPoolExecutor() as exe:
+        with ThreadPoolExecutor(max_workers=cpu_count) as exe:
             try:
                 for doc in documents:
                     for page in doc.pages:
@@ -911,9 +934,8 @@ def populate_cache(clear_all: bool = False):
 
                             block_img = page_img[ymin:ymax, xmin:xmax]
                             block.style = layout_style_analyzer(block, block_img, exe)
-                        break
+                        return
 
-                    return
                     doc.save_as_cache()
             except KeyboardInterrupt:
                 exe.shutdown(wait=False, cancel_futures=True)
