@@ -811,7 +811,7 @@ class LayoutStyleAnalyzer:
         return img.shape[0] / len(lines)
 
     def _align_characters(self, block: BlockInfo, img_rgb: np.ndarray, lines: list[list[np.ndarray]], exe: Executor):
-        font_families: list[FontAnalysisResult] = []
+        font_families_futures: list[Future[FontAnalysisResult]] = []
         colors = []
         chars = []
 
@@ -860,7 +860,9 @@ class LayoutStyleAnalyzer:
                         colors.append(pixels.copy())
 
                     # font family
-                    font_families.append(self.font.find_best_match(ch, mask))
+                    font_families_futures.append(exe.submit(self.font.find_best_match, ch, mask))
+
+        font_families = [x.result() for x in font_families_futures]
 
         if len(colors) == 0 or len(font_families) == 0:
             return None
