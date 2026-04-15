@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import unicodedata
 
 from dataclasses import dataclass
-from rich.progress import track
 from typing import Any, cast, Sequence
 from beartype import beartype
 from PIL import Image
@@ -746,8 +745,8 @@ class LayoutStyleAnalyzer:
 
         if dt_polys.size == 0:
             print("[WARN] 텍스트를 인식하지 못함")
-            # plt.imshow(block_img)
-            # plt.show()
+            plt.imshow(block_img)
+            plt.show()
             return None
 
         lines = self._extract_lines(dt_polys, dt_scores)
@@ -899,43 +898,26 @@ def populate_cache(clear_all: bool = False):
             if os.path.isdir(f"data/{doc}"):
                 documents.append(layout_analyzer(doc))
 
-    cpus = os.cpu_count() or 1
-
     with LayoutStyleAnalyzer() as layout_style_analyzer:
-        with ThreadPoolExecutor(max_workers=cpus) as exe_outer:
-            with ThreadPoolExecutor(max_workers=cpus * 4) as exe_inner:
-                try:
-                    for doc in track(documents, description="Documents..."):
-                        styles: list[Future[BlockStyle | None]] = []
+        with ThreadPoolExecutor() as exe:
+            try:
+                for doc in documents:
+                    for page in doc.pages:
+                        page_img = np.asarray(page.screenshot.convert("RGB"))
 
-                        for page in doc.pages:
-                            page_img = np.asarray(page.screenshot.convert("RGB"))
+                        for block in page.blocks:
+                            xmin, ymin, xmax, ymax = block.bbox
 
-                            for block in page.blocks:
-                                xmin, ymin, xmax, ymax = block.bbox
+                            # Padding
+                            xmin = max(xmin - 8, 0)
+                            ymin = max(ymin - 8, 0)
+                            xmax = min(xmax + 8, page_img.shape[1])
+                            ymax = min(ymax + 8, page_img.shape[0])
 
-                                # Padding
-                                xmin = max(xmin - 2, 0)
-                                ymin = max(ymin - 2, 0)
-                                xmax = min(xmax + 2, page_img.shape[1])
-                                ymax = min(ymax + 2, page_img.shape[0])
+                            block_img = page_img[ymin:ymax, xmin:xmax]
+                            block.style = layout_style_analyzer(block, block_img, exe)
 
-                                block_img = page_img[ymin:ymax, xmin:xmax]
-                                styles.append(exe_outer.submit(layout_style_analyzer, block, block_img, exe_inner))
-
-                        styles_iter = iter(styles)
-
-                        for page in track(doc.pages, description="Pages..."):
-                            for block in track(page.blocks, description="Blocks..."):
-                                try:
-                                    curr_style = next(styles_iter)
-                                except StopIteration:
-                                    raise RuntimeError("styles iterator ended early")
-
-                                block.style = curr_style.result()
-
-                        doc.save_as_cache()
-                except KeyboardInterrupt:
-                    exe_outer.shutdown(wait=False, cancel_futures=True)
-                    exe_inner.shutdown(wait=False, cancel_futures=True)
-                    raise
+                    doc.save_as_cache()
+            except KeyboardInterrupt:
+                exe.shutdown(wait=False, cancel_futures=True)
+                raise
