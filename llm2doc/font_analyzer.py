@@ -9,6 +9,7 @@ from beartype import beartype
 from typing import Sequence, Self
 from PIL import Image, ImageFont, ImageDraw
 from skimage.morphology import skeletonize
+from collections import OrderedDict
 
 
 FONT_PADDING = 8
@@ -162,6 +163,13 @@ class FontAnalysisResult:
         which = int(np.argmin(self.cost))
         return self.font_size[which]
 
+    def clone(self):
+        return FontAnalysisResult(
+            cost=self.cost.copy(),
+            font_size=self.font_size.copy(),
+            font_paths=self.font_paths,
+        )
+
     @classmethod
     def merge_prediction(cls, results: Sequence[Self]):
         if len(results) == 0:
@@ -175,14 +183,90 @@ class FontAnalysisResult:
         return FontAnalysisResult(cost=cost, font_size=font_size, font_paths=results[0].font_paths)
 
 
+def compute_font_match(
+    char: str, img_mask: np.ndarray, fonts: list[tuple[Lock, str, ImageFont.FreeTypeFont]], font_paths: tuple[str, ...]
+) -> FontAnalysisResult:
+    assert img_mask.ndim == 2
+    assert img_mask.dtype == np.uint8
+
+    H, W = img_mask.shape
+    STRUCTURE_WEIGHT = 0.5
+
+    img_weight = (255 - img_mask).astype(np.float32) / 255.0
+
+    img_bool = (img_mask >= 128).astype(np.uint8)
+    dt_img = cv2.distanceTransform(img_bool, cv2.DIST_L2, 5)
+    np.clip(dt_img, None, np.sqrt(H * W), out=dt_img)
+
+    sum_img = np.sum(img_weight)
+
+    costs = np.empty(len(fonts), dtype=np.float32)
+    sizes = np.empty(len(fonts), dtype=np.float32)
+    images = []
+
+    sizes[...] = np.nan
+
+    for i, (lock, file_path, font) in enumerate(fonts):
+        with lock:
+            rendered, font_size = render_character_keep_aspect(char, font, H, W)
+
+        assert rendered.shape == img_mask.shape
+        images.append(rendered)
+
+        rendered_weight = rendered.astype(np.float32) / 255.0
+        rendered_mask = (rendered < 128).astype(np.uint8)
+        dt_render = cv2.distanceTransform(rendered_mask, cv2.DIST_L2, 5)
+        np.clip(dt_render, None, np.sqrt(H * W), out=dt_render)
+
+        sum_render = np.sum(rendered_weight)
+
+        # 1. Mean Chamfer Distance (Good for bulk shape/thickness alignment)
+        cost_forward = np.sum(dt_render * img_weight) / sum_img if sum_img > 0 else 1e6
+        cost_inverse = np.sum(dt_img * rendered_weight) / sum_render if sum_render > 0 else 1e6
+        base_cost = cost_forward + cost_inverse
+
+        # 2. Hausdorff Approximation (95th Percentile Distance)
+        # This heavily penalizes protrusions like Serifs that exist in one but not the other
+        mask_img_bool = img_weight > 0.5
+        mask_render_bool = rendered_weight > 0.5
+
+        haus_forward = np.percentile(dt_render[mask_img_bool], 95) if np.any(mask_img_bool) else 1e6
+        haus_inverse = np.percentile(dt_img[mask_render_bool], 95) if np.any(mask_render_bool) else 1e6
+        hausdorff_cost = haus_forward + haus_inverse
+
+        # 3. Intersection over Union (IoU) Penalty
+        intersection = np.logical_and(mask_img_bool, mask_render_bool)
+        union = np.logical_or(mask_img_bool, mask_render_bool)
+        iou = np.sum(intersection) / np.sum(union) if np.sum(union) > 0 else 0
+        iou_penalty = (1.0 - iou) * 10.0  # Scale it up so it impacts the final score
+
+        # Combine costs (You can tweak these weights)
+        HAUSDORFF_WEIGHT = 0.5
+        IOU_WEIGHT = 1.0
+
+        costs[i] = base_cost + (HAUSDORFF_WEIGHT * hausdorff_cost) + (IOU_WEIGHT * iou_penalty)
+
+        if font_size is not None:
+            sizes[i] = font_size
+
+    if False:
+        which = int(np.argmin(costs))
+        display_fonts(img_mask, images, costs, which)
+
+    return FontAnalysisResult(cost=costs, font_size=sizes, font_paths=font_paths)
+
+
 @beartype
 class FontAnalyzer:
     """
     이 클래스는 멀티스레드를 고려해서 코딩되어야 함.
     """
 
-    def __init__(self):
+    def __init__(self, max_cache_size: int = 500):
         self.fonts: list[tuple[Lock, str, ImageFont.FreeTypeFont]] = []
+        self._cache: OrderedDict[tuple[str, bytes], FontAnalysisResult] = OrderedDict()
+        self._cache_lock = Lock()
+        self._max_cache_size = max_cache_size
 
         for file_name in os.listdir("data/font"):
             if not file_name.endswith(".ttf"):
@@ -204,75 +288,22 @@ class FontAnalyzer:
 
         raise ValueError(f"Font {font_path} is not in registry")
 
-    def find_best_match(self, char: str, img_mask: np.ndarray):
-        assert img_mask.ndim == 2
-        assert img_mask.dtype == np.uint8
+    def find_best_match(self, char: str, img_mask: np.ndarray) -> FontAnalysisResult:
+        cache_key = (char, img_mask.tobytes())
 
-        H, W = img_mask.shape
-        STRUCTURE_WEIGHT = 0.5
+        with self._cache_lock:
+            if cache_key in self._cache:
+                self._cache.move_to_end(cache_key)
+                return self._cache[cache_key]
 
-        img_weight = (255 - img_mask).astype(np.float32) / 255.0
+        result = compute_font_match(char, img_mask, self.fonts, self.font_paths)
 
-        img_bool = (img_mask >= 128).astype(np.uint8)
-        dt_img = cv2.distanceTransform(img_bool, cv2.DIST_L2, 5)
-        np.clip(dt_img, None, np.sqrt(H * W), out=dt_img)
+        with self._cache_lock:
+            self._cache[cache_key] = result
+            if len(self._cache) > self._max_cache_size:
+                self._cache.popitem(last=False)
 
-        sum_img = np.sum(img_weight)
-
-        costs = np.empty(len(self.fonts), dtype=np.float32)
-        sizes = np.empty(len(self.fonts), dtype=np.float32)
-        images = []
-
-        sizes[...] = np.nan
-
-        for i, (lock, file_path, font) in enumerate(self.fonts):
-            with lock:
-                rendered, font_size = render_character_keep_aspect(char, font, H, W)
-
-            assert rendered.shape == img_mask.shape
-            images.append(rendered)
-
-            rendered_weight = rendered.astype(np.float32) / 255.0
-            rendered_mask = (rendered < 128).astype(np.uint8)
-            dt_render = cv2.distanceTransform(rendered_mask, cv2.DIST_L2, 5)
-            np.clip(dt_render, None, np.sqrt(H * W), out=dt_render)
-
-            sum_render = np.sum(rendered_weight)
-
-            # 1. Mean Chamfer Distance (Good for bulk shape/thickness alignment)
-            cost_forward = np.sum(dt_render * img_weight) / sum_img if sum_img > 0 else 1e6
-            cost_inverse = np.sum(dt_img * rendered_weight) / sum_render if sum_render > 0 else 1e6
-            base_cost = cost_forward + cost_inverse
-
-            # 2. Hausdorff Approximation (95th Percentile Distance)
-            # This heavily penalizes protrusions like Serifs that exist in one but not the other
-            mask_img_bool = img_weight > 0.5
-            mask_render_bool = rendered_weight > 0.5
-
-            haus_forward = np.percentile(dt_render[mask_img_bool], 95) if np.any(mask_img_bool) else 1e6
-            haus_inverse = np.percentile(dt_img[mask_render_bool], 95) if np.any(mask_render_bool) else 1e6
-            hausdorff_cost = haus_forward + haus_inverse
-
-            # 3. Intersection over Union (IoU) Penalty
-            intersection = np.logical_and(mask_img_bool, mask_render_bool)
-            union = np.logical_or(mask_img_bool, mask_render_bool)
-            iou = np.sum(intersection) / np.sum(union) if np.sum(union) > 0 else 0
-            iou_penalty = (1.0 - iou) * 10.0  # Scale it up so it impacts the final score
-
-            # Combine costs (You can tweak these weights)
-            HAUSDORFF_WEIGHT = 0.5
-            IOU_WEIGHT = 1.0
-
-            costs[i] = base_cost + (HAUSDORFF_WEIGHT * hausdorff_cost) + (IOU_WEIGHT * iou_penalty)
-
-            if font_size is not None:
-                sizes[i] = font_size
-
-        if False:
-            which = int(np.argmin(costs))
-            display_fonts(img_mask, images, costs, which)
-
-        return FontAnalysisResult(cost=costs, font_size=sizes, font_paths=self.font_paths)
+        return result.clone()
 
 
 if __name__ == "__main__":
