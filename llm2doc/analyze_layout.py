@@ -755,8 +755,8 @@ class LayoutStyleAnalyzer:
 
         if dt_polys.size == 0:
             print("[WARN] 텍스트를 인식하지 못함")
-            plt.imshow(block_img)
-            plt.show()
+            # plt.imshow(block_img)
+            # plt.show()
             return None
 
         lines = self._extract_lines(dt_polys, dt_scores)
