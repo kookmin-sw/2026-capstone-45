@@ -899,23 +899,6 @@ def populate_cache(clear_all: bool = False):
     with LayoutStyleAnalyzer() as layout_style_analyzer:
         with ThreadPoolExecutor() as exe:
             try:
-                doc = documents[4]
-                page = doc.pages[0]
-                page_img = np.asarray(page.screenshot.convert("RGB"))
-
-                for block in page.blocks:
-                    xmin, ymin, xmax, ymax = block.bbox
-
-                    # Padding
-                    xmin = max(xmin - 8, 0)
-                    ymin = max(ymin - 8, 0)
-                    xmax = min(xmax + 8, page_img.shape[1])
-                    ymax = min(ymax + 8, page_img.shape[0])
-
-                    block_img = page_img[ymin:ymax, xmin:xmax]
-                    block.style = layout_style_analyzer(block, block_img, exe)
-                exit()
-
                 for doc in documents:
                     for page in doc.pages:
                         page_img = np.asarray(page.screenshot.convert("RGB"))
