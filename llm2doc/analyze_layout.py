@@ -6,7 +6,6 @@ import re
 import paddle
 import pickle
 import cv2
-import pytesseract
 import matplotlib.pyplot as plt
 import unicodedata
 
@@ -22,10 +21,12 @@ from paddlex.inference.pipelines.paddleocr_vl.result import (
     PaddleOCRVLBlock,
 )
 from paddlex.inference.models.text_detection.result import TextDetResult
+from tesserocr import PyTessBaseAPI, OEM, PSM, RIL
 
 from .util import validate_type
 from .render_image import render_boxes
 from .font_analyzer import FontAnalyzer, FontAnalysisResult
+from .tesseract import download_tessdata
 
 
 REGEX_NEWLINE = re.compile(r"[\r\n]+")
@@ -122,14 +123,14 @@ def _fit_bbox_by_connected(img: np.ndarray, bbox: np.ndarray | Sequence):
     return np.array([new_xmin, new_ymin, new_xmax, new_ymax], dtype=np.int32)
 
 
-def _propose_character_segment(img_mask: np.ndarray, exe: Executor) -> list[int]:
+def _propose_character_segment(img_mask: np.ndarray, tess_line: PyTessBaseAPI) -> list[int]:
     """X좌표의 목록을 리턴함"""
 
     PIX_BG = 255
     H, W = img_mask.shape
 
-    # PSM: https://tesseract-ocr.github.io/tessdoc/ImproveQuality#page-segmentation-method
-    data = exe.submit(lambda x: pytesseract.image_to_boxes(x, lang="kor+eng", config="--psm 7 --oem 0"), img_mask)
+    tess_line.SetImage(Image.fromarray(img_mask))
+    boxes = tess_line.GetComponentImages(RIL.SYMBOL, True)
 
     coords = cast(list[int], [])
 
@@ -143,14 +144,10 @@ def _propose_character_segment(img_mask: np.ndarray, exe: Executor) -> list[int]
         coords.append(min(W - 1, max(0, left)))
         coords.append(min(W - 1, max(0, right)))
 
-    data = unicodedata.normalize("NFC", data.result())
-
-    for x in data.split("\n"):
-        if len(x.strip()) == 0:
-            continue
-        _, xmin, _, xmax, _, _ = x.rsplit(maxsplit=5)
-        coords.append(min(W - 1, int(xmin)))
-        coords.append(min(W - 1, int(xmax)))
+    if boxes:
+        for im, box, _, _ in boxes:
+            coords.append(min(W - 1, box["x"]))
+            coords.append(min(W - 1, box["x"] + box["w"]))
 
     coords.sort()
 
@@ -235,7 +232,7 @@ def _slice_source_text(gt_text: str, pred_text: str) -> tuple[int, int]:
     return best_start, best_end
 
 
-def _segment_single_char(img_mask: np.ndarray, real_text: str, exe: Executor):
+def _segment_single_char(img_mask: np.ndarray, real_text: str, tess_line: PyTessBaseAPI, tess_char: PyTessBaseAPI):
     MIN_RATIO = 0.1
     MAX_RATIO = 2
     H, W = img_mask.shape
@@ -245,16 +242,15 @@ def _segment_single_char(img_mask: np.ndarray, real_text: str, exe: Executor):
 
     img_mask_padded = np.pad(img_mask, [[8, 8], [0, 0]], constant_values=255)
 
-    # PSM: https://tesseract-ocr.github.io/tessdoc/ImproveQuality#page-segmentation-method
-    pred_text = exe.submit(
-        lambda x: pytesseract.image_to_string(x, lang="kor+eng", config="--psm 7 --oem 1"), img_mask_padded
-    )
+    tess_line.SetImage(Image.fromarray(img_mask_padded))
+    pred_text_raw = tess_line.GetUTF8Text()
+    pred_text = unicodedata.normalize("NFC", pred_text_raw).strip()
 
-    x_bars = _propose_character_segment(img_mask_padded, exe)
+    x_bars = _propose_character_segment(img_mask_padded, tess_line)
 
     processed: set[tuple[int, ...]] = set()
     bboxes = cast(list[np.ndarray], [])
-    futures = cast(list[Future[str]], [])
+    char_texts = cast(list[str], [])
 
     for i, begin in enumerate(x_bars[:-1]):
         for end in x_bars[i + 1 :]:
@@ -284,19 +280,14 @@ def _segment_single_char(img_mask: np.ndarray, real_text: str, exe: Executor):
             segment = np.pad(segment, [[8, 8], [8, 8]], constant_values=255)
 
             bboxes.append(bbox)
-            futures.append(
-                exe.submit(lambda x: pytesseract.image_to_string(x, lang="kor+eng", config="--psm 10 --oem 1"), segment)
-            )
-
-    pred_text = pred_text.result()
-    pred_text = unicodedata.normalize("NFC", pred_text).strip()
+            tess_char.SetImage(Image.fromarray(segment))
+            char_texts.append(tess_char.GetUTF8Text())
 
     begin, end = _slice_source_text(real_text, pred_text)
     full_text = real_text[begin:end].strip()
 
     candidates: list[tuple[np.ndarray, str]] = []
-    for bbox, future in zip(bboxes, futures):
-        data = future.result()
+    for bbox, data in zip(bboxes, char_texts):
         data = unicodedata.normalize("NFC", data).strip()
 
         # 1글자짜리 텍스트만 남김
@@ -721,6 +712,10 @@ class LayoutStyleAnalyzer:
         self.ocr: TextDetection | None = None
         self.font = FontAnalyzer()
 
+        download_tessdata()
+        self.tesseract_line = PyTessBaseAPI(path="./tessdata", lang="eng+kor", oem=OEM.DEFAULT, psm=PSM.SINGLE_LINE)
+        self.tesseract_char = PyTessBaseAPI(path="./tessdata", lang="eng+kor", oem=OEM.DEFAULT, psm=PSM.SINGLE_CHAR)
+
     def load_model(self):
         self.ocr = TextDetection(
             model_name="PP-OCRv5_server_det",
@@ -842,7 +837,7 @@ class LayoutStyleAnalyzer:
 
                 # TODO: Tesseract 호출 전에 높이를 20~60px로 맞추기
 
-                detections = _segment_single_char(segment_mask, block.content, exe)
+                detections = _segment_single_char(segment_mask, block.content, self.tesseract_line, self.tesseract_char)
 
                 for bbox, ch in detections:
                     mask = _slice_img(segment_mask, bbox)
@@ -916,7 +911,9 @@ def populate_cache(clear_all: bool = False):
 
                             block_img = page_img[ymin:ymax, xmin:xmax]
                             block.style = layout_style_analyzer(block, block_img, exe)
+                        break
 
+                    return
                     doc.save_as_cache()
             except KeyboardInterrupt:
                 exe.shutdown(wait=False, cancel_futures=True)
