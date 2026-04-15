@@ -21,13 +21,13 @@ from paddlex.inference.pipelines.paddleocr_vl.result import (
     PaddleOCRVLBlock,
 )
 from paddlex.inference.models.text_detection.result import TextDetResult
-from tesserocr import PyTessBaseAPI, OEM, PSM, RIL
+from tesserocr import OEM, PSM, RIL
+from rich.progress import track
 
 from .util import validate_type
 from .render_image import render_boxes
 from .font_analyzer import FontAnalyzer, FontAnalysisResult
 from .tesseract import download_tessdata, TesseractFleet
-from .dummy_executor import DummyExecutor
 
 
 REGEX_NEWLINE = re.compile(r"[\r\n]+")
@@ -919,11 +919,11 @@ def populate_cache(clear_all: bool = False):
     with LayoutStyleAnalyzer() as layout_style_analyzer:
         with ThreadPoolExecutor(max_workers=cpu_count) as exe:
             try:
-                for doc in documents:
-                    for page in doc.pages:
+                for doc in track(documents, description="Documents..."):
+                    for page in track(doc.pages, description="Pages..."):
                         page_img = np.asarray(page.screenshot.convert("RGB"))
 
-                        for block in page.blocks:
+                        for block in track(page.blocks, description="Blocks..."):
                             xmin, ymin, xmax, ymax = block.bbox
 
                             # Padding
@@ -934,7 +934,6 @@ def populate_cache(clear_all: bool = False):
 
                             block_img = page_img[ymin:ymax, xmin:xmax]
                             block.style = layout_style_analyzer(block, block_img, exe)
-                        return
 
                     doc.save_as_cache()
             except KeyboardInterrupt:
