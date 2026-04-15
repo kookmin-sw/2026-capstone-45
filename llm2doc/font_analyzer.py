@@ -236,33 +236,41 @@ class FontAnalyzer:
             images.append(rendered)
 
             rendered_weight = rendered.astype(np.float32) / 255.0
-
             rendered_mask = (rendered < 128).astype(np.uint8)
             dt_render = cv2.distanceTransform(rendered_mask, cv2.DIST_L2, 5)
             sum_render = np.sum(rendered_weight)
 
-            # Symmetric chamfer distance (Area)
+            # 1. Mean Chamfer Distance (Good for bulk shape/thickness alignment)
             cost_forward = np.sum(dt_render * img_weight) / sum_img if sum_img > 0 else 1e6
             cost_inverse = np.sum(dt_img * rendered_weight) / sum_render if sum_render > 0 else 1e6
             base_cost = cost_forward + cost_inverse
 
-            # Symmetric chamfer distance (Skeleton)
-            render_skel = skeletonize(rendered_weight > 0.5).astype(np.uint8)
-            render_skel_inv = (1 - render_skel).astype(np.uint8)
-            dt_render_skel = cv2.distanceTransform(render_skel_inv, cv2.DIST_L2, 5)
-            sum_render_skel = np.sum(render_skel)
+            # 2. Hausdorff Approximation (95th Percentile Distance)
+            # This heavily penalizes protrusions like Serifs that exist in one but not the other
+            mask_img_bool = img_weight > 0.5
+            mask_render_bool = rendered_weight > 0.5
 
-            skel_cost_forward = np.sum(dt_render_skel * img_skel) / sum_img_skel if sum_img_skel > 0 else 1e6
-            skel_cost_inverse = np.sum(dt_img_skel * render_skel) / sum_render_skel if sum_render_skel > 0 else 1e6
-            skel_cost = skel_cost_forward + skel_cost_inverse
+            haus_forward = np.percentile(dt_render[mask_img_bool], 95) if np.any(mask_img_bool) else 1e6
+            haus_inverse = np.percentile(dt_img[mask_render_bool], 95) if np.any(mask_render_bool) else 1e6
+            hausdorff_cost = haus_forward + haus_inverse
 
-            costs[i] = base_cost + (STRUCTURE_WEIGHT * skel_cost)
+            # 3. Intersection over Union (IoU) Penalty
+            intersection = np.logical_and(mask_img_bool, mask_render_bool)
+            union = np.logical_or(mask_img_bool, mask_render_bool)
+            iou = np.sum(intersection) / np.sum(union) if np.sum(union) > 0 else 0
+            iou_penalty = (1.0 - iou) * 10.0  # Scale it up so it impacts the final score
+
+            # Combine costs (You can tweak these weights)
+            HAUSDORFF_WEIGHT = 0.5
+            IOU_WEIGHT = 1.0
+
+            costs[i] = base_cost + (HAUSDORFF_WEIGHT * hausdorff_cost) + (IOU_WEIGHT * iou_penalty)
 
             if font_size is not None:
                 sizes[i] = font_size
 
         if False:
-            which = np.argmin(costs)
+            which = int(np.argmin(costs))
             display_fonts(img_mask, images, costs, which)
 
         return FontAnalysisResult(cost=costs, font_size=sizes, font_paths=self.font_paths)
