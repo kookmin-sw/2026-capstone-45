@@ -868,7 +868,7 @@ class LayoutStyleAnalyzer:
         font_family = FontAnalysisResult.merge_prediction(font_families)
         color = _get_median_color(np.concat(colors, axis=0))
 
-        _show_font(chars, self.font, font_family)
+        # _show_font(chars, self.font, font_family)
 
         return font_family, color
 
