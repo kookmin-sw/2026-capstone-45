@@ -215,12 +215,9 @@ class FontAnalyzer:
 
         img_bool = (img_mask >= 128).astype(np.uint8)
         dt_img = cv2.distanceTransform(img_bool, cv2.DIST_L2, 5)
-        sum_img = np.sum(img_weight)
+        np.clip(dt_img, None, np.sqrt(H * W), out=dt_img)
 
-        img_skel = skeletonize(img_weight > 0.5).astype(np.uint8)
-        img_skel_inv = (1 - img_skel).astype(np.uint8)
-        dt_img_skel = cv2.distanceTransform(img_skel_inv, cv2.DIST_L2, 5)
-        sum_img_skel = np.sum(img_skel)
+        sum_img = np.sum(img_weight)
 
         costs = np.empty(len(self.fonts), dtype=np.float32)
         sizes = np.empty(len(self.fonts), dtype=np.float32)
@@ -238,6 +235,8 @@ class FontAnalyzer:
             rendered_weight = rendered.astype(np.float32) / 255.0
             rendered_mask = (rendered < 128).astype(np.uint8)
             dt_render = cv2.distanceTransform(rendered_mask, cv2.DIST_L2, 5)
+            np.clip(dt_render, None, np.sqrt(H * W), out=dt_render)
+
             sum_render = np.sum(rendered_weight)
 
             # 1. Mean Chamfer Distance (Good for bulk shape/thickness alignment)
