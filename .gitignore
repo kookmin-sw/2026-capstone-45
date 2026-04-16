@@ -4,3 +4,4 @@ artifacts/
 *.py[cod]
 *$py.class
 OCR_results/
+.vscode

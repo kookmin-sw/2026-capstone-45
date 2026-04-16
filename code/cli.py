@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from .generation_pipeline import generate_document
 from .generation_types import GenerationConfig
 from .reference_pipeline import parse_reference
+from .render_pipeline import render_generated_document
 from .semantic_types import SemanticConfig
 from .visualize import render_reference_visualization
 
@@ -42,6 +43,13 @@ def build_parser() -> argparse.ArgumentParser:
     generate_parser.add_argument("--generation-model", default="Qwen/Qwen3.5-9B")
     generate_parser.add_argument("--generation-runtime", choices=["transformers", "api"], default="api")
     generate_parser.add_argument("--generation-device", default="auto")
+
+    render_parser = subparsers.add_parser("render-document", help="Render generated slot drafts back onto reference page images")
+    render_parser.add_argument("--reference-artifact-dir", required=True)
+    render_parser.add_argument("--generation-artifact-dir", required=True)
+    render_parser.add_argument("--output-dir", default=None)
+    render_parser.add_argument("--reference-source", default=None)
+    render_parser.add_argument("--llm2doc-root", default="llm-to-document")
     return parser
 
 
@@ -87,6 +95,16 @@ def main() -> int:
             source_artifact_dir=args.source_artifact_dir,
             artifacts_root=args.artifacts_root,
             generation_config=generation_config,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "render-document":
+        result = render_generated_document(
+            reference_artifact_dir=args.reference_artifact_dir,
+            generation_artifact_dir=args.generation_artifact_dir,
+            output_dir=args.output_dir,
+            reference_source=args.reference_source,
+            llm2doc_root=args.llm2doc_root,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
