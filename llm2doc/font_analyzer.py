@@ -150,7 +150,7 @@ class FontAnalysisResult:
     """L2 difference between font and actual image."""
 
     font_size: np.ndarray
-    """Font size of i-th font in points."""
+    """Font size of i-th font in pixels."""
 
     font_paths: Sequence[str]
     """What font the i-th entry is."""

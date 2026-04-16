@@ -22,7 +22,7 @@ from paddlex.inference.pipelines.paddleocr_vl.result import (
 )
 from paddlex.inference.models.text_detection.result import TextDetResult
 from tesserocr import OEM, PSM, RIL
-from rich.progress import track
+from rich.progress import Progress
 
 from .util import validate_type
 from .render_image import render_boxes
@@ -466,9 +466,18 @@ class BlockInfo:
     content: str
     bbox: list[int]
     style: BlockStyle | None
-    is_text: bool
-    is_image: bool
-    is_html: bool
+
+    @property
+    def is_text(self) -> bool:
+        return not (self.is_image or self.is_html)
+
+    @property
+    def is_image(self) -> bool:
+        return self.label in ("image", "chart")
+
+    @property
+    def is_html(self) -> bool:
+        return self.label in ("table",)
 
     def to_structured_html(self, page: "ParsedPage", indent: int = 0, block_id: str | None = None) -> str:
         result = []
@@ -548,6 +557,7 @@ class ParsedPage:
         texts = []
 
         for block in self.blocks:
+            print(block.label, block.content[:10])
             bboxes.append(block.bbox)
 
             if block.is_text:
@@ -603,10 +613,9 @@ class LayoutAnalyzer:
         # 데모 프로그램의 세팅을 그대로 이용
         self.pipeline = PaddleOCRVL(
             use_layout_detection=True,
-            merge_layout_blocks=False,
-            layout_threshold=0.5,
+            merge_layout_blocks=True,
             layout_nms=True,
-            # layout_unclip_ratio=1.05,
+            layout_unclip_ratio=1.1,
         )
 
     @classmethod
@@ -669,19 +678,12 @@ class LayoutAnalyzer:
             for block in output["parsing_res_list"]:
                 block = validate_type(block, PaddleOCRVLBlock)
 
-                is_image = block.label == "image"
-                is_html = block.label == "table"
-                is_text = not is_image and not is_html
-
                 blocks.append(
                     BlockInfo(
                         label=block.label,
                         content=block.content,
                         bbox=block.bbox,
                         style=None,
-                        is_text=is_text,
-                        is_image=is_image,
-                        is_html=is_html,
                     )
                 )
 
@@ -755,6 +757,7 @@ class LayoutStyleAnalyzer:
 
         if dt_polys.size == 0:
             print("[WARN] 텍스트를 인식하지 못함")
+            block.label = "image"
             # plt.imshow(block_img)
             # plt.show()
             return None
@@ -778,21 +781,11 @@ class LayoutStyleAnalyzer:
         )
 
     def _extract_lines(self, dt_polys: np.ndarray, dt_scores: np.ndarray):
+        assert 0 < len(dt_polys)
+
         dt_polys_ind = np.argsort(np.min(dt_polys[:, :, 1], axis=1))
         dt_polys = dt_polys[dt_polys_ind]
         dt_scores = dt_scores[dt_polys_ind]
-
-        ymin = np.min(dt_polys[:, :, 1], axis=1)
-        ymax = np.max(dt_polys[:, :, 1], axis=1)
-
-        box_heights = ymax - ymin
-        box_height = np.median(box_heights)
-
-        # 중앙값과 비슷한 높이만 걸러냄 (문단단위로 박스가 나눠졌기 때문에 괜찮음)
-        dt_polys_mask = np.isclose(box_heights, box_height, rtol=0.5, atol=0)
-        dt_polys = dt_polys[dt_polys_mask]
-        dt_scores = dt_scores[dt_polys_mask]
-        assert 0 < len(dt_polys)
 
         # y좌표가 절반 이상 겹치면 한 줄로 간주
         lines = cast(list[list[np.ndarray]], [[dt_polys[0].copy()]])
@@ -916,26 +909,33 @@ def populate_cache(clear_all: bool = False):
 
     cpu_count = os.cpu_count() or 4
 
+    total_blocks = sum((len(page.blocks) for doc in documents for page in doc.pages))
+
     with LayoutStyleAnalyzer() as layout_style_analyzer:
         with ThreadPoolExecutor(max_workers=cpu_count) as exe:
             try:
-                for doc in track(documents, description="Documents..."):
-                    for page in track(doc.pages, description="Pages..."):
-                        page_img = np.asarray(page.screenshot.convert("RGB"))
+                with Progress() as progress:
+                    task = progress.add_task("Analyzing style...", total=total_blocks)
 
-                        for block in track(page.blocks, description="Blocks..."):
-                            xmin, ymin, xmax, ymax = block.bbox
+                    for doc in documents:
+                        for page in doc.pages:
+                            page_img = np.asarray(page.screenshot.convert("RGB"))
 
-                            # Padding
-                            xmin = max(xmin - 8, 0)
-                            ymin = max(ymin - 8, 0)
-                            xmax = min(xmax + 8, page_img.shape[1])
-                            ymax = min(ymax + 8, page_img.shape[0])
+                            for block in page.blocks:
+                                xmin, ymin, xmax, ymax = block.bbox
 
-                            block_img = page_img[ymin:ymax, xmin:xmax]
-                            block.style = layout_style_analyzer(block, block_img, exe)
+                                # Padding
+                                xmin = max(xmin - 8, 0)
+                                ymin = max(ymin - 8, 0)
+                                xmax = min(xmax + 8, page_img.shape[1])
+                                ymax = min(ymax + 8, page_img.shape[0])
 
-                    doc.save_as_cache()
+                                block_img = page_img[ymin:ymax, xmin:xmax]
+                                block.style = layout_style_analyzer(block, block_img, exe)
+                                progress.advance(task, 1)
+
+                        doc.save_as_cache()
+                        print(f"Finished {doc.id}")
             except KeyboardInterrupt:
                 exe.shutdown(wait=False, cancel_futures=True)
                 raise
