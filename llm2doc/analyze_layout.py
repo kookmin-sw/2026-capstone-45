@@ -236,7 +236,7 @@ def _slice_source_text(gt_text: str, pred_text: str) -> tuple[int, int]:
 
 def _segment_single_char(
     img_mask: np.ndarray, real_text: str, exe: Executor, tess_line: TesseractFleet, tess_char: TesseractFleet
-):
+) -> tuple[list[tuple[np.ndarray, str]], int]:
     MIN_RATIO = 0.1
     MAX_RATIO = 2
     H, W = img_mask.shape
@@ -298,8 +298,12 @@ def _segment_single_char(
 
     pred_text = unicodedata.normalize("NFC", pred_text_future.result()).strip()
 
+    # To preserve exact offset counting relative to real_text's start:
+    # 1. Start from 0, up to a safely padded `end` from slice detection
+    # 2. Do not strip whitespaces off the full constraint text.
     begin, end = _slice_source_text(real_text, pred_text)
-    full_text = real_text[begin:end].strip()
+    search_end = min(len(real_text), end + 16)
+    full_text = real_text[:search_end]
 
     candidates: list[tuple[np.ndarray, str]] = []
     for bbox, data in zip(bboxes, char_texts):
@@ -313,8 +317,6 @@ def _segment_single_char(
 
     candidates.sort(key=lambda x: x[0][2])
     candidates.insert(0, (np.asarray([-1, -1, -1, -1], dtype=np.int32), ""))
-
-    # 이 아래 코드는 AI로 생성했음.
 
     M = len(candidates)
     N = len(full_text)
@@ -399,7 +401,10 @@ def _segment_single_char(
         final_bboxes.reverse()
         final_texts.reverse()
 
-    return list(zip(final_bboxes, final_texts))
+        # Reports the minimal index into real_text that was successfully matched
+        return list(zip(final_bboxes, final_texts)), best_j
+
+    return [], 0
 
 
 def _show_font(collected_chars: list, font: FontAnalyzer, font_family: FontAnalysisResult):
@@ -779,7 +784,7 @@ class LayoutStyleAnalyzer:
             font_size=float(font.best_font_size()),
         )
 
-    def _extract_lines(self, dt_polys: np.ndarray, dt_scores: np.ndarray):
+    def _extract_lines(self, image_mask: np.ndarray, dt_polys: np.ndarray, dt_scores: np.ndarray, real_text: str):
         assert 0 < len(dt_polys)
 
         dt_polys_ind = np.argsort(np.min(dt_polys[:, :, 1], axis=1))
@@ -817,6 +822,9 @@ class LayoutStyleAnalyzer:
         colors = []
         chars = []
 
+        # Track our working offset in the text block
+        text_remaining = block.content
+
         for line in lines:
             for box in line:
                 xmin = np.min(box[:, 0])
@@ -844,9 +852,13 @@ class LayoutStyleAnalyzer:
 
                 # TODO: Tesseract 호출 전에 높이를 20~60px로 맞추기
 
-                detections = _segment_single_char(
-                    segment_mask, block.content, exe, self.tesseract_line, self.tesseract_char
+                # Fetch matched detections and exactly how many characters were semi-greedily consumed
+                detections, consumed_len = _segment_single_char(
+                    segment_mask, text_remaining, exe, self.tesseract_line, self.tesseract_char
                 )
+
+                # Advance text_remaining to avoid overlaps
+                text_remaining = text_remaining[consumed_len:]
 
                 for bbox, ch in detections:
                     mask = _slice_img(segment_mask, bbox)
