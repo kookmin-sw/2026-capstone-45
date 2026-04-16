@@ -10,6 +10,7 @@ from typing import Sequence, Self
 from PIL import Image, ImageFont, ImageDraw
 from skimage.morphology import skeletonize
 from collections import OrderedDict
+from fontTools.ttLib import TTFont
 
 
 FONT_PADDING = 8
@@ -183,8 +184,20 @@ class FontAnalysisResult:
         return FontAnalysisResult(cost=cost, font_size=font_size, font_paths=results[0].font_paths)
 
 
+def contains_glyph(font_data: TTFont, char: str):
+    for cmap in font_data["cmap"].tables:
+        if cmap.isUnicode() and ord(char) in cmap.cmap:
+            return True
+
+    return False
+
+
 def compute_font_match(
-    char: str, img_mask: np.ndarray, fonts: list[tuple[Lock, str, ImageFont.FreeTypeFont]], font_paths: tuple[str, ...]
+    char: str,
+    img_mask: np.ndarray,
+    fonts: list[tuple[Lock, str, ImageFont.FreeTypeFont]],
+    font_datas: list[TTFont],
+    font_paths: tuple[str, ...],
 ) -> FontAnalysisResult:
     assert img_mask.ndim == 2
     assert img_mask.dtype == np.uint8
@@ -206,8 +219,11 @@ def compute_font_match(
 
     sizes[...] = np.nan
 
-    for i, (lock, file_path, font) in enumerate(fonts):
+    for i, ((lock, file_path, font), font_data) in enumerate(zip(fonts, font_datas)):
         with lock:
+            if not contains_glyph(font_data, char):
+                costs[i] = 100_000_000
+
             rendered, font_size = render_character_keep_aspect(char, font, H, W)
 
         assert rendered.shape == img_mask.shape
@@ -264,6 +280,7 @@ class FontAnalyzer:
 
     def __init__(self, max_cache_size: int = 500):
         self.fonts: list[tuple[Lock, str, ImageFont.FreeTypeFont]] = []
+        self.font_datas: list[TTFont] = []
         self._cache: OrderedDict[tuple[str, bytes], FontAnalysisResult] = OrderedDict()
         self._cache_lock = Lock()
         self._max_cache_size = max_cache_size
@@ -275,6 +292,7 @@ class FontAnalyzer:
             file_path = f"data/font/{file_name}"
             font = ImageFont.truetype(file_path, size=100)
             self.fonts.append((Lock(), file_path, font))
+            self.font_datas.append(TTFont(file_path))
 
         self.font_paths = tuple((x[1] for x in self.fonts))
 
@@ -296,7 +314,7 @@ class FontAnalyzer:
                 self._cache.move_to_end(cache_key)
                 return self._cache[cache_key]
 
-        result = compute_font_match(char, img_mask, self.fonts, self.font_paths)
+        result = compute_font_match(char, img_mask, self.fonts, self.font_datas, self.font_paths)
 
         with self._cache_lock:
             self._cache[cache_key] = result

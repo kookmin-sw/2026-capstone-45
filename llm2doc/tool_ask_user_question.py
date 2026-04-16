@@ -59,7 +59,7 @@ class ToolAskUserQuestion:
         for i, x in enumerate(choices):
             print(f"[{i + 1}] {x}")
 
-        print(f"[{len(choices)}] 답변 직접 입력")
+        print(f"[{len(choices) + 1}] 답변 직접 입력")
 
         while True:
             try:
@@ -67,10 +67,10 @@ class ToolAskUserQuestion:
             except ValueError:
                 continue
 
-            if choice == len(choices):
+            if choice == len(choices) + 1:
                 return input("답변: ")
 
             try:
-                return choices[choice]
+                return choices[choice - 1]
             except IndexError:
                 continue

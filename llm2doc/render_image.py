@@ -18,21 +18,15 @@ from concurrent.futures import Future, ThreadPoolExecutor
 if TYPE_CHECKING:
     import llm2doc.analyze_layout
 
-
 COLOR_PRIOR = "green"
 COLOR_SELECTED = "blue"
 COLOR_NEXT = "red"
 
 LINE_WIDTH = 2
-
-# CSS-like ordered font stack
-FONT_FAMILIES = ["Noto Sans CJK KR", "Arial", "sans-serif"]
+DEFAULT_FONT = "./data/font/malgun.ttf"
 
 OVERFLOW_VISIBLE = False
 
-# Access textlayout directly through the skia module
-FONT_COLLECTION = skia.textlayout.FontCollection()
-FONT_COLLECTION.setDefaultFontManager(skia.FontMgr())
 UNICODE = skia.Unicodes.ICU.Make()
 
 # Thread-local storage to hold per-thread Html2Image instances
@@ -71,65 +65,68 @@ def render_single_text(
     image: Image.Image,
     bbox: Sequence[int | float],
     text: str,
-    extend_bbox: bool = False,
+    block_info: "llm2doc.analyze_layout.BlockInfo | None",
 ) -> Image.Image:
-    if extend_bbox:
+    if block_info is not None and block_info.style is not None:
+        style = block_info.style
+    else:
+        style = None
+
+    if len(text.strip()) == 0:
+        return image
+
+    if style is not None and style.line_count == 1:
         bbox = _extend_bounding_box(image, bbox)
 
     x_min, y_min, x_max, y_max = map(int, bbox)
 
     img_arr = np.asarray(image.convert("RGB"))
-    bg_color = np.median(img_arr[y_min:y_max, x_min:x_max], axis=(0, 1))
-    if np.mean(bg_color) < 127:
-        text_color = skia.ColorWHITE
+
+    if style is not None:
+        r, g, b = style.color
+        text_color = skia.Color4f(r / 255, g / 255, b / 255, 1.0)
     else:
-        text_color = skia.ColorBLACK
-
-    abs_width = x_max - x_min
-    abs_height = y_max - y_min
-
-    box_width = int(abs_width)
-    box_height = int(abs_height)
-
-    def create_paragraph(text_content: str, font_size: float) -> skia.textlayout.Paragraph:
-        para_style = skia.textlayout.ParagraphStyle()
-        text_style = skia.textlayout.TextStyle()
-        text_style.setColor(text_color)
-        text_style.setFontSize(font_size)
-        text_style.setFontFamilies(FONT_FAMILIES)
-
-        builder = skia.textlayout.ParagraphBuilder(para_style, FONT_COLLECTION, UNICODE)
-        builder.pushStyle(text_style)
-        builder.addText(text_content)
-
-        paragraph = builder.Build()
-        return paragraph
-
-    min_size = 1.0
-    max_size = float(max(box_width, box_height))
-    best_size = min_size
-    final_paragraph = None
-
-    # Binary search for optimal text size
-    for _ in range(100):
-        mid_size = (min_size + max_size) / 2
-        para = create_paragraph(text, mid_size)
-
-        para.layout(box_width)
-
-        if para.Height <= box_height and para.MinIntrinsicWidth <= box_width:
-            best_size = mid_size
-            min_size = mid_size
-            final_paragraph = para
+        bg_color = np.median(img_arr[y_min:y_max, x_min:x_max], axis=(0, 1))
+        if np.mean(bg_color) < 128:
+            text_color = skia.ColorWHITE
         else:
-            max_size = mid_size
+            text_color = skia.ColorBLACK
 
-    if not extend_bbox and box_height * 0.9 <= best_size:
-        return render_single_text(image, bbox, text, True)
+    font_size = style.font_size if style is not None else 128
 
-    if final_paragraph is None:
-        final_paragraph = create_paragraph(text, best_size)
-        final_paragraph.layout(box_width)
+    box_width = int(x_max - x_min)
+    box_height = int(y_max - y_min)
+
+    font_path = DEFAULT_FONT
+    if style is not None:
+        font_path = style.font_family
+
+    typeface = skia.Typeface.MakeFromFile(font_path)
+    if not typeface:
+        typeface = skia.Typeface.MakeFromFile(DEFAULT_FONT)
+
+    family_name = typeface.getFamilyName() if typeface else "sans-serif"
+
+    font_provider = skia.textlayout.TypefaceFontProvider()
+    if typeface:
+        font_provider.registerTypeface(typeface, family_name)
+
+    font_collection = skia.textlayout.FontCollection()
+    font_collection.setDefaultFontManager(font_provider)
+
+    para_style = skia.textlayout.ParagraphStyle()
+    text_style = skia.textlayout.TextStyle()
+    text_style.setColor(text_color)
+    text_style.setFontSize(font_size)
+
+    text_style.setFontFamilies([family_name])
+
+    builder = skia.textlayout.ParagraphBuilder(para_style, font_collection, UNICODE)
+    builder.pushStyle(text_style)
+    builder.addText(text)
+
+    paragraph = builder.Build()
+    paragraph.layout(box_width)
 
     surface = skia.Surface.MakeRasterN32Premul(box_width, box_height)
     canvas = surface.getCanvas()
@@ -138,7 +135,7 @@ def render_single_text(
         clip_rect = skia.Rect.MakeWH(box_width, box_height)
         canvas.clipRect(clip_rect, skia.ClipOp.kIntersect, True)
 
-    final_paragraph.paint(canvas, 0, 0)
+    paragraph.paint(canvas, 0, 0)
 
     snapshot = surface.makeImageSnapshot()
     image_array = snapshot.toarray(
@@ -466,12 +463,30 @@ def render_boxes(
     del draw
 
     if text is not None:
-        for bbox, t in zip(bboxes, text):
+        for bbox, t, blk in zip(bboxes, text, block_info or [None] * len(bboxes)):
             if t is not None:
-                image = render_single_text(image, bbox, t)
+                image = render_single_text(image, bbox, t, blk)
 
     if html is not None:
         assert block_info is not None
-        image = _draw_html(image, bboxes, html, block_info)
+        # image = _draw_html(image, bboxes, html, block_info)
 
     return image
+
+
+def main():
+    img = Image.new("RGB", (800, 800))
+    bbox = (100, 100, 700, 500)
+    img = render_single_text(img, bbox, "Hello, world!", None)
+
+    draw = ImageDraw.ImageDraw(img)
+    draw.rectangle(bbox)
+
+    import matplotlib.pyplot as plt
+
+    plt.imshow(np.asarray(img))
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

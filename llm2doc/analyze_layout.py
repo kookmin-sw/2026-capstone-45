@@ -615,7 +615,6 @@ class LayoutAnalyzer:
             use_layout_detection=True,
             merge_layout_blocks=True,
             layout_nms=True,
-            layout_unclip_ratio=1.1,
         )
 
     @classmethod
