@@ -12,7 +12,7 @@ from typing import Sequence, List, Any, cast
 from openai.types.responses.response_input_param import ResponseInputParam
 
 from .analyze_layout import LayoutAnalyzer, ParsedDocument
-from .render_image import render_boxes, erase_bounding_box
+from .render_image import render_document, render_page, RenderedPage
 from .util import image_as_data_uri
 from .tool_fetch_source_document import ToolFetchSourceDocument
 from .tool_search_source_document import ToolSearchSourceDocument
@@ -161,7 +161,7 @@ def write_document(
     system_prompt = PROMPT_SYSTEM.strip().format()
 
     user_prompt = PROMPT_USER.strip().format(
-        query=query.replace("&", "&amp;").replace("<", "&gt;").replace(">", "&lt;"),
+        query=query.strip().replace("&", "&amp;").replace("<", "&gt;").replace(">", "&lt;"),
         target=target_doc.to_sturctured_html(doc_id="target"),
     )
 
@@ -285,12 +285,11 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
         Image.open(f"data/{target_doc}/{x}") for x in target_doc_image_names if x.startswith("original")
     ]
 
-    # imagine = write_document(client, query, src_docs_parsed, target_doc_parsed)
-    with open("debug_write_output.txt", "rt", encoding="utf-8") as f:
-        imagine = f.read()
+    imagine = write_document(client, query, src_docs_parsed, target_doc_parsed)
+    # with open("debug_write_output.txt", "rt", encoding="utf-8") as f:
+    #     imagine = f.read()
 
     # 작성한 문서를 렌더링함
-    bboxes = [[y.bbox for y in x.blocks] for x in target_doc_parsed.pages]
     texts = [[cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages]
     htmls = [[cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages]
 
@@ -316,31 +315,16 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
                 # texts[block_page][block_idx] = "[이미지]"
                 continue
 
-            if block.find("table") is not None:
-                block = deepcopy(block)
-                block.attrs["id"] = "root"
-                htmls[block_page][block_idx] = str(block)
-                continue
+            htmls[block_page][block_idx] = block.decode_contents()
 
-            texts[block_page][block_idx] = block.text.strip()
+    rendered_pages: list[RenderedPage] = []
 
-    for i, img in enumerate(target_doc_images):
-        valid_bboxes = []
+    for i, (page, img) in enumerate(zip(target_doc_parsed.pages, target_doc_images)):
+        rendered_pages.append(render_page(page, img, htmls[i], f"page-{i + 1}"))
 
-        for bbox, text, html in zip(bboxes[i], texts[i], htmls[i]):
-            if text is not None or html is not None:
-                valid_bboxes.append(bbox)
+    rendered_doc = render_document(rendered_pages)
+    rendered_doc_json = rendered_doc.model_dump_json()
+    with open("debug_finish.json", "wt", encoding="utf-8") as f:
+        f.write(rendered_doc_json)
 
-        img = img.copy()
-        for bbox in valid_bboxes:
-            img = erase_bounding_box(img, bbox)
-
-        img = render_boxes(
-            img,
-            bboxes[i],
-            texts[i],
-            htmls[i],
-            target_doc_parsed.pages[i].blocks,
-        )
-
-        img.save(f"debug_finish_{i + 1}.png")
+    return rendered_doc

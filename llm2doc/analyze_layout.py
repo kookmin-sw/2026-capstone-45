@@ -25,7 +25,6 @@ from tesserocr import OEM, PSM, RIL
 from rich.progress import Progress
 
 from .util import validate_type
-from .render_image import render_boxes
 from .font_analyzer import FontAnalyzer, FontAnalysisResult
 from .tesseract import download_tessdata, TesseractFleet
 
@@ -565,7 +564,8 @@ class ParsedPage:
             else:
                 texts.append(f"[{block.label}]")
 
-        return render_boxes(reconstructed_img, bboxes=bboxes, selected=-1, text=texts)
+        # return render_boxes(reconstructed_img, bboxes=bboxes, selected=-1, text=texts)
+        raise RuntimeError("not yet implemented")
 
 
 @beartype

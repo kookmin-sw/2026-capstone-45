@@ -11,8 +11,10 @@
 		"format": "biome check --fix"
 	},
 	"dependencies": {
+		"@tanstack/react-query": "^5.99.0",
 		"react": "^19.2.4",
-		"react-dom": "^19.2.4"
+		"react-dom": "^19.2.4",
+		"zod": "^4.3.6"
 	},
 	"devDependencies": {
 		"@babel/core": "^7.29.0",

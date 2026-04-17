@@ -1,334 +1,79 @@
+import io
 import os
-import math
 import uuid
-import tempfile
-import threading
-import time
+import base64
 import numpy as np
-import random
-import skia
 
-from PIL import Image, ImageDraw
+from fontTools.ttLib import TTFont
+from PIL import Image
+from typing import Sequence
+from pydantic import BaseModel
 from beartype import beartype
-from typing import Sequence, cast, TYPE_CHECKING
-from rich.progress import track
-from html2image import Html2Image
-from concurrent.futures import Future, ThreadPoolExecutor
 
-if TYPE_CHECKING:
-    import llm2doc.analyze_layout
-
-COLOR_PRIOR = "green"
-COLOR_SELECTED = "blue"
-COLOR_NEXT = "red"
-
-LINE_WIDTH = 2
-DEFAULT_FONT = "./data/font/malgun.ttf"
-
-OVERFLOW_VISIBLE = False
-
-UNICODE = skia.Unicodes.ICU.Make()
-
-# Thread-local storage to hold per-thread Html2Image instances
-thread_local = threading.local()
+from .analyze_layout import ParsedPage
 
 
-def _create_html2image_instance():
-    tempdir = tempfile.gettempdir()
-    tempdir = os.path.join(tempdir, uuid.uuid4().hex)
+class RenderedBlock(BaseModel):
+    id: str
+    bbox: Sequence[float]
 
-    try:
-        return Html2Image(
-            browser="chrome",
-            temp_path=tempdir,
-            output_path=tempdir,
-            disable_logging=True,
-        )
-    except FileNotFoundError:
-        pass
+    line_height: float
+    font_family: str
+    font_size: float
+    color: str
 
-    try:
-        return Html2Image(browser="edge", temp_path=tempdir, output_path=tempdir, disable_logging=True)
-    except FileNotFoundError:
-        pass
-
-    raise RuntimeError("Could not find a suitable browser.")
+    html: str
 
 
-def _init_thread():
-    """Initializes thread-local storage for the thread pool worker."""
-    thread_local.hti = _create_html2image_instance()
+class RenderedPage(BaseModel):
+    bg_url: str
+    width: int
+    height: int
+    blocks: list[RenderedBlock]
 
 
-@beartype
-def render_single_text(
-    image: Image.Image,
-    bbox: Sequence[int | float],
-    text: str,
-    block_info: "llm2doc.analyze_layout.BlockInfo | None",
-) -> Image.Image:
-    if block_info is not None and block_info.style is not None:
-        style = block_info.style
-    else:
-        style = None
-
-    if len(text.strip()) == 0:
-        return image
-
-    if style is not None and style.line_count == 1:
-        bbox = _extend_bounding_box(image, bbox)
-
-    x_min, y_min, x_max, y_max = map(int, bbox)
-
-    img_arr = np.asarray(image.convert("RGB"))
-
-    if style is not None:
-        r, g, b = style.color
-        text_color = skia.Color4f(r / 255, g / 255, b / 255, 1.0)
-    else:
-        bg_color = np.median(img_arr[y_min:y_max, x_min:x_max], axis=(0, 1))
-        if np.mean(bg_color) < 128:
-            text_color = skia.ColorWHITE
-        else:
-            text_color = skia.ColorBLACK
-
-    font_size = style.font_size if style is not None else 128
-
-    box_width = int(x_max - x_min)
-    box_height = int(y_max - y_min)
-
-    font_path = DEFAULT_FONT
-    if style is not None:
-        font_path = style.font_family
-
-    typeface = skia.Typeface.MakeFromFile(font_path)
-    if not typeface:
-        typeface = skia.Typeface.MakeFromFile(DEFAULT_FONT)
-
-    family_name = typeface.getFamilyName() if typeface else "sans-serif"
-
-    font_provider = skia.textlayout.TypefaceFontProvider()
-    if typeface:
-        font_provider.registerTypeface(typeface, family_name)
-
-    font_collection = skia.textlayout.FontCollection()
-    font_collection.setDefaultFontManager(font_provider)
-
-    para_style = skia.textlayout.ParagraphStyle()
-    text_style = skia.textlayout.TextStyle()
-    text_style.setColor(text_color)
-    text_style.setFontSize(font_size)
-
-    text_style.setFontFamilies([family_name])
-
-    builder = skia.textlayout.ParagraphBuilder(para_style, font_collection, UNICODE)
-    builder.pushStyle(text_style)
-    builder.addText(text)
-
-    paragraph = builder.Build()
-    paragraph.layout(box_width)
-
-    surface = skia.Surface.MakeRasterN32Premul(box_width, box_height)
-    canvas = surface.getCanvas()
-
-    if not OVERFLOW_VISIBLE:
-        clip_rect = skia.Rect.MakeWH(box_width, box_height)
-        canvas.clipRect(clip_rect, skia.ClipOp.kIntersect, True)
-
-    paragraph.paint(canvas, 0, 0)
-
-    snapshot = surface.makeImageSnapshot()
-    image_array = snapshot.toarray(
-        colorType=skia.ColorType.kRGBA_8888_ColorType,
-        alphaType=skia.AlphaType.kUnpremul_AlphaType,
-    )
-
-    text_overlay = Image.fromarray(image_array, "RGBA")
-    image.paste(text_overlay, (int(x_min), int(y_min)), mask=text_overlay)
-
-    return image
+class RenderedDocument(BaseModel):
+    id: str
+    pages: list[RenderedPage]
 
 
-@beartype
-def _render_html_fragment(
-    html: str,
-    box_width: int,
-    box_height: int,
-    bg_color: str,
-    block_info: "llm2doc.analyze_layout.BlockInfo",
-) -> Image.Image | None:
-    if box_width <= 0 or box_height <= 0:
-        return None
+def _get_font_name(font: TTFont):
+    name_table = font["name"]
 
-    style = block_info.style
-    assert style is not None
+    for record in name_table.names:
+        if record.nameID == 4:
+            return record.toUnicode()
 
-    styled_html = f"""
-    <html>
-    <head>
-        <style>
-            body {{
-                overflow: hidden;
-                background-color: #{bg_color};
-                font-size: {style.font_size:.4f}px;
-                line-height: {style.line_height}px;
-                width: {box_width}px;
-                height: {box_height}px;
-                min-width: {box_width}px;
-                min-height: {box_height}px;
-                max-width: {box_width}px;
-                max-height: {box_height}px;
-            }}
-            *, ::after, ::before {{
-                box-sizing: border-box;
-                margin: 0;
-                padding: 0;
-            }}
-            body > div {{
-                width: 100%;
-                height: 100%;
-            }}
-            p {{
-                white-space: pre-wrap;
-            }}
-            table {{
-                width: 100%;
-            }}
-            table, th, td {{
-                border: 1px solid black;
-                border-collapse: collapse;
-            }}
-        </style>
-    </head>
-    <body>
-        {html}
-    </body>
-    </html>
-    """
+    ids = [int(record.nameID) for record in name_table.names]
 
-    temp_filename = f"temp_render_{uuid.uuid4().hex}.png"
-
-    # Use the thread-local Html2Image instance
-    final_filename = thread_local.hti.screenshot(
-        html_str=styled_html, save_as=temp_filename, size=(box_width, box_height)
-    )[0]
-
-    try:
-        with Image.open(final_filename) as img:
-            html_image = img.convert("RGBA")
-    finally:
-        if os.path.exists(final_filename):
-            os.remove(final_filename)
-
-    return html_image
+    raise RuntimeError(f"Could not find font name. {ids=}")
 
 
-def _draw_html(
-    image: Image.Image,
-    bboxes: Sequence[Sequence[int | float]],
-    html: Sequence[str | None],
-    block_info: Sequence["llm2doc.analyze_layout.BlockInfo"],
-) -> Image.Image:
-    if len(bboxes) < len(html):
-        raise IndexError("length of html_fragments exceeds length of bboxes")
+class PathToFontFamily:
+    def __init__(self):
+        self.path_to_font_map: dict[str, str] = dict()
+        self.font_to_path_map: dict[str, str] = dict()
 
-    rgb_image = image.convert("RGB")
-    img_arr = np.array(rgb_image)
-
-    cpu_count = os.cpu_count() or 1
-    cpu_count *= 16
-    tasks = cast(list[tuple[Future, int, int]], [])
-
-    with ThreadPoolExecutor(max_workers=cpu_count, initializer=_init_thread) as exe:
-        for i, html_frag in enumerate(html):
-            if html_frag is None:
+        files = os.listdir("data/font")
+        for file in files:
+            if not file.endswith(".ttf"):
                 continue
 
-            bbox = _extend_bounding_box(image, bboxes[i])
-            x_min, y_min, x_max, y_max = map(int, bbox)
+            path = f"data/font/{file}"
+            name = _get_font_name(TTFont(path))
 
-            box_width = x_max - x_min
-            box_height = y_max - y_min
+            self.path_to_font_map[path] = name
+            self.font_to_path_map[name] = path
 
-            if box_width <= 0 or box_height <= 0:
-                continue
+    def path_to_font(self, path: str):
+        return self.path_to_font_map[path]
 
-            bg_color = np.median(img_arr[y_min:y_max, x_min:x_max], axis=(0, 1))
-            bg_color = "".join([f"{int(x):02x}" for x in bg_color])
-
-            future = exe.submit(
-                _render_html_fragment,
-                html_frag,
-                box_width,
-                box_height,
-                bg_color,
-                block_info[i],
-            )
-
-            tasks.append((future, x_min, y_min))
-
-        for i, (future, x_min, y_min) in enumerate(track(tasks, description="Rendering HTML...")):
-            html_image = future.result()
-
-            if html_image is not None:
-                image.paste(html_image, (x_min, y_min), mask=html_image)
-
-    return image
+    def font_to_path(self, font: str):
+        return self.font_to_path_map[font]
 
 
 @beartype
-def _draw_striped_rectangle(
-    draw: ImageDraw.ImageDraw,
-    bbox: Sequence[int | float],
-    colors: list,
-    width: int,
-    dash_length: int,
-):
-    """Helper function to draw a dashed/striped rectangle."""
-    x_min, y_min, x_max, y_max = bbox
-
-    # Define the 4 line segments of the rectangle's perimeter
-    lines = [
-        ((x_min, y_min), (x_max, y_min)),  # Top
-        ((x_max, y_min), (x_max, y_max)),  # Right
-        ((x_max, y_max), (x_min, y_max)),  # Bottom
-        ((x_min, y_max), (x_min, y_min)),  # Left
-    ]
-
-    color_idx = 0
-
-    for start_pt, end_pt in lines:
-        x1, y1 = start_pt
-        x2, y2 = end_pt
-
-        # Total distance of the current edge
-        length = math.hypot(x2 - x1, y2 - y1)
-        if length == 0:
-            continue
-
-        dx = (x2 - x1) / length
-        dy = (y2 - y1) / length
-
-        # Step along the edge and draw dashes
-        curr_dist = 0
-        while curr_dist < length:
-            dash_end = min(curr_dist + dash_length, length)
-
-            px1 = x1 + dx * curr_dist
-            py1 = y1 + dy * curr_dist
-            px2 = x1 + dx * dash_end
-            py2 = y1 + dy * dash_end
-
-            # Select the next color in the pattern
-            current_color = colors[color_idx % len(colors)]
-            draw.line([(px1, py1), (px2, py2)], fill=current_color, width=width)
-
-            curr_dist += dash_length
-            color_idx += 1
-
-
-@beartype
-def erase_bounding_box(image: Image.Image, bbox: list) -> Image.Image:
+def _erase_bounding_box(image: Image.Image, bbox: list) -> Image.Image:
     """
     Erases an axis-aligned bounding box from a Pillow Image by filling it
     with the median color of the surrounding neighborhood.
@@ -340,10 +85,13 @@ def erase_bounding_box(image: Image.Image, bbox: list) -> Image.Image:
     Returns:
         A new PIL Image with the bounding box erased.
     """
-    MIN_PIXEL_DIM = 10  # Minimum total gap between large and small boxes
-    PIXEL_DIM_RATIO = 0.10  # Ratio of box dimensions to expand/shrink
+    MIN_PIXEL_DIM = 4  # Minimum total gap between large and small boxes
+    PIXEL_DIM_RATIO = 0.1  # Ratio of box dimensions to expand/shrink
 
-    rgb_image = image.convert("RGB")
+    if image.mode == "RGB":
+        rgb_image = image
+    else:
+        rgb_image = image.convert("RGB")
 
     img_arr = np.array(rgb_image)
     img_height, img_width = img_arr.shape[:2]
@@ -376,7 +124,7 @@ def erase_bounding_box(image: Image.Image, bbox: list) -> Image.Image:
     if len(border_pixels) > 0:
         median_color = np.median(border_pixels, axis=0).astype(np.uint8)
 
-        img_arr[ymin:ymax, xmin:xmax] = median_color
+        img_arr[ymin - 2 : ymax + 3, xmin - 2 : xmax + 3] = median_color
 
     return Image.fromarray(img_arr)
 
@@ -419,7 +167,7 @@ def _extend_bounding_box(image: Image.Image, bbox: Sequence[int | float]) -> lis
     max_limit_x = img_width - PAGE_MARGIN
 
     for x in range(xmax, max_limit_x):
-        current_border = img_arr[ymin:ymax, x]
+        current_border = img_arr[ymin:ymax, x : x + 4]
 
         if np.all(current_border == reference_color):
             new_xmax = x + 1
@@ -430,63 +178,68 @@ def _extend_bounding_box(image: Image.Image, bbox: Sequence[int | float]) -> lis
 
 
 @beartype
-def render_boxes(
-    image: Image.Image,
-    bboxes: Sequence[Sequence[int | float]],
-    text: Sequence[str | None] | None = None,
-    html: Sequence[str | None] | None = None,
-    block_info: Sequence["llm2doc.analyze_layout.BlockInfo"] | None = None,
-    selected: int | None = None,
-):
-    image = image.convert("RGBA")
-    draw = ImageDraw.Draw(image)
+def render_page(page: ParsedPage, img: Image.Image, htmls: Sequence[str | None], page_id: str) -> RenderedPage:
+    font_mapper = PathToFontFamily()
+    blocks: list[RenderedBlock] = []
 
-    if selected is not None:
-        for i, bbox in enumerate(bboxes):
-            if i < selected:
-                base_color = COLOR_PRIOR
-            elif i == selected:
-                base_color = COLOR_SELECTED
-            else:
-                base_color = COLOR_NEXT
+    img = img.convert("RGB")
 
-            stripe_pattern = ["white", base_color, "black", base_color]
+    assert len(page.blocks) == len(htmls)
 
-            _draw_striped_rectangle(
-                draw=draw,
-                bbox=bbox,
-                colors=stripe_pattern,
-                width=LINE_WIDTH,
-                dash_length=15,
+    for i, (block, html) in enumerate(zip(page.blocks, htmls)):
+        if html is None:
+            continue
+
+        bbox = block.bbox
+        can_extend = False
+
+        line_height = bbox[3] - bbox[1]
+        font_family = "sans-serif"
+        font_size = line_height
+        color = "#000"
+
+        if block.style is not None:
+            # TODO: line_height왜 이렇게 들어가는지 확인
+            line_height = (block.bbox[3] - block.bbox[1]) / block.style.line_count
+            font_family = font_mapper.path_to_font(block.style.font_family)
+            font_size = block.style.font_size
+            color = block.style.color_css
+
+            can_extend = block.style.line_count == 1 or block.content.strip().count("\n") + 1 == block.style.line_count
+
+        if can_extend:
+            bbox = _extend_bounding_box(img, bbox)
+
+        img = _erase_bounding_box(img, bbox)
+
+        blocks.append(
+            RenderedBlock(
+                id=f"{page_id}-block-{i}",
+                bbox=[float(x) for x in bbox],
+                line_height=line_height,
+                font_family=font_family,
+                font_size=font_size,
+                color=color,
+                html=html,
             )
+        )
 
-    del draw
+    buf = io.BytesIO()
+    img.save(buf, "png")
 
-    if text is not None:
-        for bbox, t, blk in zip(bboxes, text, block_info or [None] * len(bboxes)):
-            if t is not None:
-                image = render_single_text(image, bbox, t, blk)
+    bg_url = "data:image/png;base64," + base64.standard_b64encode(buf.getvalue()).decode("ascii")
 
-    if html is not None:
-        assert block_info is not None
-        # image = _draw_html(image, bboxes, html, block_info)
-
-    return image
-
-
-def main():
-    img = Image.new("RGB", (800, 800))
-    bbox = (100, 100, 700, 500)
-    img = render_single_text(img, bbox, "Hello, world!", None)
-
-    draw = ImageDraw.ImageDraw(img)
-    draw.rectangle(bbox)
-
-    import matplotlib.pyplot as plt
-
-    plt.imshow(np.asarray(img))
-    plt.show()
+    return RenderedPage(
+        bg_url=bg_url,
+        width=img.width,
+        height=img.height,
+        blocks=blocks,
+    )
 
 
-if __name__ == "__main__":
-    main()
+@beartype
+def render_document(pages: list[RenderedPage]) -> RenderedDocument:
+    return RenderedDocument(
+        id=uuid.uuid4().hex,
+        pages=pages,
+    )
