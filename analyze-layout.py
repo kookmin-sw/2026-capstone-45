@@ -16,7 +16,7 @@ if __name__ == "__main__":
             answer = "y"
 
     while answer != "y" and answer != "n":
-        answer = input("캐시를 초기화 하시겠습니까 (Y/n)?").strip().lower()
+        answer = input("캐시를 초기화 하시겠습니까 (Y/n)? ").strip().lower()
         if answer == "":
             answer = "y"
 

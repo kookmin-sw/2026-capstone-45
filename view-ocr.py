@@ -4,7 +4,7 @@ from llm2doc.analyze_layout import LayoutAnalyzer
 def main():
     layout_analyzer = LayoutAnalyzer()
 
-    parsed = layout_analyzer("news1")
+    parsed = layout_analyzer("financial2")
 
     for i, page in enumerate(parsed.pages):
         image = page.reconstruct_image()

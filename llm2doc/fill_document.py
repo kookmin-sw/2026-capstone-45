@@ -76,9 +76,7 @@ def invoke_llm(
     blue_box_coords: list[int],
     blue_box_page: int,
 ):
-    fill_prompt = FILL_PROMPT.format(
-        blue_box_coords=blue_box_coords, blue_box_page=blue_box_page
-    )
+    fill_prompt = FILL_PROMPT.format(blue_box_coords=blue_box_coords, blue_box_page=blue_box_page)
 
     content = [
         {
@@ -230,13 +228,10 @@ def fill_document(
     del layout_analyzer
 
     page_blocks = [
-        [block.bbox for block in page.blocks if block.label in FILLABLE_BLOCKS]
-        for page in target_layout.pages
+        [block.bbox for block in page.blocks if block.label in FILLABLE_BLOCKS] for page in target_layout.pages
     ]
 
-    image_paths = [
-        x for x in os.listdir(f"data/{target_doc}") if x.startswith("original")
-    ]
+    image_paths = [x for x in os.listdir(f"data/{target_doc}") if x.startswith("original")]
     image_paths.sort()
     images = [Image.open(f"data/{target_doc}/{x}") for x in image_paths]
 
