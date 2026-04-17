@@ -96,8 +96,9 @@ def _erase_bounding_box(image: Image.Image, bbox: list) -> Image.Image:
 @beartype
 def _extend_bounding_box(image: Image.Image, bbox: Sequence[int | float]) -> list[int | float]:
     """
-    Extends the bounding box to the right as long as the right border is a uniform color.
-    Terminates if any pixel on the right border differs in color (even before extending),
+    Extends the bounding box to the right as long as the right border pattern repeats.
+    Checks a 4-pixel lookahead window to ensure the column pattern is stable.
+    Terminates if any pixel in the lookahead differs from the original right-most column,
     or if it reaches page_margin pixels from the right edge of the image.
 
     Args:
@@ -121,11 +122,7 @@ def _extend_bounding_box(image: Image.Image, bbox: Sequence[int | float]) -> lis
         return list(bbox)
 
     right_border_x = xmax - 1
-    initial_border = img_arr[ymin:ymax, right_border_x]
-
-    reference_color = initial_border[0]
-    if not np.all(initial_border == reference_color):
-        return list(bbox)
+    reference_column = img_arr[ymin:ymax, right_border_x:xmax]
 
     new_xmax = xmax
     max_limit_x = img_width - PAGE_MARGIN
@@ -133,7 +130,7 @@ def _extend_bounding_box(image: Image.Image, bbox: Sequence[int | float]) -> lis
     for x in range(xmax, max_limit_x):
         current_border = img_arr[ymin:ymax, x : x + 4]
 
-        if np.all(current_border == reference_color):
+        if np.all(current_border == reference_column):
             new_xmax = x + 1
         else:
             break

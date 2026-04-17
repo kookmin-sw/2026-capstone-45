@@ -1,7 +1,4 @@
 import os
-import io
-import hashlib
-import base64
 
 from fontTools.ttLib import TTFont
 
