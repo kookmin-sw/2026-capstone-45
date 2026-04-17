@@ -24,6 +24,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "scikit-image>=0.25.2",
     "tesserocr>=2.10.0",
+    "fastapi[standard]>=0.136.0",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +48,9 @@ line-length = 120
 
 [tool.pyright]
 typeCheckingMode = "basic"
+
+[tool.fastapi]
+entrypoint = "llm2doc.server:app"
 
 [tool.uv.sources]
 paddlepaddle = [

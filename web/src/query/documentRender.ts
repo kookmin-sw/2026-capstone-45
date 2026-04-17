@@ -33,7 +33,7 @@ export const useQueryRenderedDocument = (id: string) =>
 	useQuery({
 		queryKey: [id],
 		queryFn: async () => {
-			const response = await fetch("/debug_finish.json");
+			const response = await fetch(`/api/rendered/${id}`);
 			if (!response.ok) {
 				throw new Error("Network response was not ok");
 			}

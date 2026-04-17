@@ -27,7 +27,7 @@ const renderBlocks = (page: TRenderedPage, zoom: number) => {
 					top,
 					bottom,
 					lineHeight: `${block.line_height * zoom}px`,
-					fontFamily: `${block.font_family}, sans-serif`,
+					fontFamily: `'${block.font_family}', sans-serif`,
 					fontSize: `${block.font_size * zoom}px`,
 					color: block.color,
 				}}

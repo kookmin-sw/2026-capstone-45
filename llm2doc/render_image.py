@@ -1,16 +1,15 @@
 import io
-import os
 import uuid
 import base64
 import numpy as np
 
-from fontTools.ttLib import TTFont
 from PIL import Image
 from typing import Sequence
 from pydantic import BaseModel
 from beartype import beartype
 
 from .analyze_layout import ParsedPage
+from .font import PathToFontFamily
 
 
 class RenderedBlock(BaseModel):
@@ -35,41 +34,6 @@ class RenderedPage(BaseModel):
 class RenderedDocument(BaseModel):
     id: str
     pages: list[RenderedPage]
-
-
-def _get_font_name(font: TTFont):
-    name_table = font["name"]
-
-    for record in name_table.names:
-        if record.nameID == 4:
-            return record.toUnicode()
-
-    ids = [int(record.nameID) for record in name_table.names]
-
-    raise RuntimeError(f"Could not find font name. {ids=}")
-
-
-class PathToFontFamily:
-    def __init__(self):
-        self.path_to_font_map: dict[str, str] = dict()
-        self.font_to_path_map: dict[str, str] = dict()
-
-        files = os.listdir("data/font")
-        for file in files:
-            if not file.endswith(".ttf"):
-                continue
-
-            path = f"data/font/{file}"
-            name = _get_font_name(TTFont(path))
-
-            self.path_to_font_map[path] = name
-            self.font_to_path_map[name] = path
-
-    def path_to_font(self, path: str):
-        return self.path_to_font_map[path]
-
-    def font_to_path(self, font: str):
-        return self.font_to_path_map[font]
 
 
 @beartype
