@@ -285,9 +285,9 @@ def create_document(query: str | None, src_docs: list[str], target_doc: str):
         Image.open(f"data/{target_doc}/{x}") for x in target_doc_image_names if x.startswith("original")
     ]
 
-    # imagine = write_document(client, query, src_docs_parsed, target_doc_parsed)
-    with open("debug_write_output.txt", "rt", encoding="utf-8") as f:
-        imagine = f.read()
+    imagine = write_document(client, query, src_docs_parsed, target_doc_parsed)
+    # with open("debug_write_output.txt", "rt", encoding="utf-8") as f:
+    #     imagine = f.read()
 
     # 작성한 문서를 렌더링함
     bboxes = [[y.bbox for y in x.blocks] for x in target_doc_parsed.pages]
