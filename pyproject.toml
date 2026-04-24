@@ -25,6 +25,8 @@ dependencies = [
     "scikit-image>=0.25.2",
     "tesserocr>=2.10.0",
     "fastapi[standard]>=0.136.0",
+    "pymupdf>=1.27.2.2",
+    "aiosqlite>=0.22.1",
 ]
 
 [project.optional-dependencies]

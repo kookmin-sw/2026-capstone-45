@@ -1,7 +1,6 @@
 import {
-	useQueryRenderedDocument,
-	type TRenderedBlock,
 	type TRenderedPage,
+	useQueryRenderedDocument,
 } from "../query/documentRender";
 import styles from "./DocumentRender.module.css";
 
@@ -31,6 +30,7 @@ const renderBlocks = (page: TRenderedPage, zoom: number) => {
 					fontSize: `${block.font_size * zoom}px`,
 					color: block.color,
 				}}
+				// biome-ignore lint/security/noDangerouslySetInnerHtml: safe
 				dangerouslySetInnerHTML={{ __html: block.html }}
 			></div>,
 		);
