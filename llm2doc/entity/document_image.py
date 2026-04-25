@@ -13,11 +13,11 @@ if TYPE_CHECKING:
 class DocumentImage(Base):
     __tablename__ = "document_image"
 
-    doc_id: Mapped[int] = mapped_column(ForeignKey("document.doc_id"), primary_key=True)
-    file_id: Mapped[UUID] = mapped_column(ForeignKey("file.file_id"), primary_key=True)
+    doc_id: Mapped[int] = mapped_column(ForeignKey("document.doc_id", onupdate="CASCADE", ondelete="CASCADE"), primary_key=True)
+    file_id: Mapped[UUID] = mapped_column(ForeignKey("file.file_id", onupdate="CASCADE", ondelete="RESTRICT"), primary_key=True)
     display_order: Mapped[int] = mapped_column(nullable=False)
 
-    doc: Mapped["Document"] = relationship("Document", lazy="raise_on_sql")
+    doc: Mapped["Document"] = relationship("Document", lazy="raise_on_sql", back_populates="images")
     file: Mapped["File"] = relationship("File", lazy="raise_on_sql")
 
     __table_args__ = (Index("document_image_idx_display_order", "display_order", "file_id"),)

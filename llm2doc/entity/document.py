@@ -27,8 +27,13 @@ class Document(Base):
 
     original_file: Mapped["File"] = relationship("File", lazy="raise_on_sql")
     images: WriteOnlyMapped["DocumentImage"] = relationship(
-        "DocumentImage", lazy="write_only", cascade="all, delete-orphan"
+        "DocumentImage", lazy="write_only", back_populates="doc", cascade="all, delete-orphan", passive_deletes=True
     )
     logs: WriteOnlyMapped["DocumentLog"] = relationship(
-        "DocumentLog", lazy="write_only", cascade="all, delete-orphan", order_by=DocumentLog.doc_log_id
+        "DocumentLog",
+        lazy="write_only",
+        back_populates="doc",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by=DocumentLog.doc_log_id,
     )
