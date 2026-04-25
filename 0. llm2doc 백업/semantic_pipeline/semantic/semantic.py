@@ -5,12 +5,12 @@ from typing import Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
-from .semantic_backends.qwen_transformers import QwenTransformersBackend
+from .semantic_backends.qwen_api import QwenAPIBackend
 from .semantic_context import build_block_context
 from .semantic_engine import resolve_block_decision
 from .semantic_schema import enrich_generated_role
 from .semantic_types import RoleDecision, SemanticConfig, SemanticRunSummary
-from .types import CanonicalBlock, FusedPage, PageAnalysis
+from ..common.types import CanonicalBlock, CanonicalPage, PageAnalysis
 
 
 def _reset_semantic_fields(block: CanonicalBlock) -> None:
@@ -100,7 +100,7 @@ def _apply_decision_to_block(
     block.generated_role_level = decision.generated_role_level
 
 
-def _assign_section_ids(pages: List[FusedPage]) -> None:
+def _assign_section_ids(pages: List[CanonicalPage]) -> None:
     section_counter = 0
     for page in pages:
         current_section_id: Optional[str] = None
@@ -142,17 +142,15 @@ def _make_unknown_decision(block: CanonicalBlock, reason: str) -> RoleDecision:
 
 
 def apply_financial_semantic_overlay(
-    pages: List[FusedPage],
+    pages: List[CanonicalPage],
     analyses: List[PageAnalysis],
     config: Optional[SemanticConfig] = None,
-    backend: Optional[QwenTransformersBackend] = None,
+    backend: Optional[QwenAPIBackend] = None,
     document_family: str = "financial_report",
 ) -> SemanticRunSummary:
     config = config or SemanticConfig()
     analysis_map: Dict[int, PageAnalysis] = {analysis.page: analysis for analysis in analyses}
-    backend_name_str = (
-        backend.backend_name if backend else ("qwen_api" if config.runtime == "api" else "qwen_transformers")
-    )
+    backend_name_str = backend.backend_name if backend else "qwen_api"
     fallback_reasons: Counter = Counter()
     applied_source_counts: Counter = Counter()
     confidence_values: List[float] = []
@@ -198,7 +196,7 @@ def apply_financial_semantic_overlay(
             tasks.append((block, payload, fallback_decision))
 
         if tasks:
-            max_workers = 10 if config.runtime == "api" else 1
+            max_workers = 10
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_block = {
                     executor.submit(

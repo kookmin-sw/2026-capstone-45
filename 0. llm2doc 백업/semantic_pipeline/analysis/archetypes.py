@@ -1,7 +1,7 @@
 from typing import List, Sequence
 
-from .types import CanonicalBlock, FusedPage, PageAnalysis
-from .utils import EMAIL_RE, TICKER_RE, area_ratio, count_columns, detect_language, has_financial_signal, median_or_default, union_bbox
+from ..common.types import CanonicalBlock, CanonicalPage, PageAnalysis
+from ..common.utils import EMAIL_RE, TICKER_RE, area_ratio, count_columns, detect_language, has_financial_signal, median_or_default, union_bbox
 
 
 TEXT_LIKE_LABELS = {
@@ -25,7 +25,7 @@ def _textual_quality_blocks(blocks: Sequence[CanonicalBlock]) -> List[CanonicalB
     return [block for block in blocks if block.canonical_label in TEXT_LIKE_LABELS and block.text]
 
 
-def classify_page(page: FusedPage) -> PageAnalysis:
+def classify_page(page: CanonicalPage) -> PageAnalysis:
     page_area = max(1, page.width * page.height)
     blocks = page.blocks
     content_blocks = [block for block in blocks if not _is_meta_candidate(block)]
@@ -106,9 +106,6 @@ def classify_page(page: FusedPage) -> PageAnalysis:
         warnings.append("low_ocr_quality")
     if not substantial_text_blocks:
         warnings.append("sparse_text")
-    if len(page.source_engines) == 1:
-        warnings.append("single_engine_only")
-
     if column_count >= 3:
         dominant_layout_pattern = "multi_column"
     elif column_count == 2:
@@ -137,7 +134,7 @@ def classify_page(page: FusedPage) -> PageAnalysis:
     )
 
 
-def detect_document_family(pages: Sequence[FusedPage], analyses: Sequence[PageAnalysis]) -> str:
+def detect_document_family(pages: Sequence[CanonicalPage], analyses: Sequence[PageAnalysis]) -> str:
     candidate_pages = list(pages[:2]) if len(pages) >= 2 else list(pages)
     joined_text = "\n".join(block.text for page in candidate_pages for block in page.blocks if block.text)
     financial_hits = 0
@@ -161,6 +158,6 @@ def detect_document_family(pages: Sequence[FusedPage], analyses: Sequence[PageAn
     return "report"
 
 
-def detect_language_from_pages(pages: Sequence[FusedPage]) -> str:
+def detect_language_from_pages(pages: Sequence[CanonicalPage]) -> str:
     texts = [block.text for page in pages for block in page.blocks if block.text]
     return detect_language(texts)

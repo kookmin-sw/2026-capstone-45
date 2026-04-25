@@ -25,7 +25,6 @@ class CanonicalBlock:
     canonical_label: str
     text: str
     text_source: str
-    engine_sources: List[str]
     bbox_px: List[int]
     bbox_norm: List[float]
     reading_order: int
@@ -66,14 +65,18 @@ class EnginePage:
 
 
 @dataclass
-class FusedPage:
+class CanonicalPage:
     page: int
     sample_id: str
     width: int
     height: int
     blocks: List[CanonicalBlock]
-    source_engines: List[str]
+    source_engine: str = "paddle"
     diagnostics: Dict[str, Any] = field(default_factory=dict)
+
+
+# Backward-compatible alias for older internal names.
+FusedPage = CanonicalPage
 
 
 @dataclass
@@ -128,13 +131,10 @@ class UnsupportedBlock:
 class PageSource:
     page_number: int
     sample_id: str
-    dolphin_json_path: Optional[str] = None
-    dolphin_layout_path: Optional[str] = None
-    dolphin_markdown_path: Optional[str] = None
-    paddle_json_path: Optional[str] = None
-    paddle_markdown_path: Optional[str] = None
-    paddle_visualization_path: Optional[str] = None
-    surya_image_path: Optional[str] = None
+    source_type: str
+    reference_doc_id: str
+    document_dir: str
+    image_path: Optional[str] = None
 
 
 @dataclass

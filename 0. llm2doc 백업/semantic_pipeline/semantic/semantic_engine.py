@@ -1,7 +1,7 @@
 from dataclasses import asdict, replace
 from typing import Optional, Tuple
 
-from .semantic_backends import QwenAPIBackend, QwenTransformersBackend
+from .semantic_backends.qwen_api import QwenAPIBackend
 from .semantic_schema import enrich_generated_role, normalize_decision, parse_role_decision, validate_role_pair
 from .semantic_types import BlockContextPayload, RoleDecision, RoleTraceEntry, SemanticConfig
 
@@ -40,7 +40,7 @@ def resolve_block_decision(
     payload: BlockContextPayload,
     fallback_decision: RoleDecision,
     config: SemanticConfig,
-    backend: Optional[QwenAPIBackend | QwenTransformersBackend] = None,
+    backend: Optional[QwenAPIBackend] = None,
 ) -> Tuple[RoleDecision, Optional[RoleTraceEntry], Optional[str], bool]:
     fallback_decision = enrich_generated_role(fallback_decision)
 

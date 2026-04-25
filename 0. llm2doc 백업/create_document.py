@@ -27,7 +27,7 @@ from .tool_fetch_source_document import ToolFetchSourceDocument
 from .tool_search_source_document import ToolSearchSourceDocument
 
 RESULT_OUTPUT_ROOT = r"C:\Users\echin\Desktop\ALLLM\llm-to-document\output"
-RESULT_OUTPUT_DIR_NAME = "integrate_news1_financial2"
+RESULT_OUTPUT_DIR_NAME = "integrate_financial1_financial2"
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 WORKSPACE_ROOT = PROJECT_ROOT.parent
@@ -194,6 +194,10 @@ def _has_semantic_artifact(artifacts_root: Path, doc_id: str) -> bool:
     )
 
 
+def _semantic_visualization_path(artifacts_root: Path, doc_id: str) -> Path:
+    return _semantic_artifact_dir(artifacts_root, doc_id) / "reference_visualization.html"
+
+
 def ensure_semantic_artifacts(
     doc_ids: Sequence[str],
     artifacts_root: Path,
@@ -226,7 +230,6 @@ def ensure_semantic_artifacts(
             reference_path=doc_id,
             artifacts_root=str(artifacts_root),
             semantic_config=SemanticConfig(mode="qwen", runtime="api"),
-            ocr_source="llm2doc",
             llm2doc_root=str(PROJECT_ROOT),
         )
         created_any = True
@@ -239,6 +242,40 @@ def ensure_semantic_artifacts(
             )
 
     return created_any
+
+
+def ensure_semantic_visualizations(
+    doc_ids: Sequence[str],
+    artifacts_root: Path,
+    tracer: DecisionTracer | None = None,
+) -> list[Path]:
+    from .semantic_pipeline.visualize import render_reference_visualization
+
+    visualization_paths: list[Path] = []
+
+    for doc_id in doc_ids:
+        artifact_dir = _semantic_artifact_dir(artifacts_root, doc_id)
+        if not artifact_dir.exists():
+            continue
+
+        output_path = _semantic_visualization_path(artifacts_root, doc_id)
+        render_reference_visualization(
+            artifact_dir=str(artifact_dir),
+            output_path=str(output_path),
+        )
+        visualization_paths.append(output_path)
+
+        if tracer is not None:
+            tracer.event(
+                "semantic_artifacts",
+                "visualization_ready",
+                {
+                    "document_id": doc_id,
+                    "visualization_path": str(output_path),
+                },
+            )
+
+    return visualization_paths
 
 
 def pydantic_encoder(obj):
@@ -742,11 +779,17 @@ def create_document(
         },
     )
     artifacts_created = False
+    semantic_visualization_paths: list[Path] = []
 
     try:
         # 문서 불러와서 파싱
         # 소스/타깃 문서를 모두 OCR 구조로 로딩한다.
         artifacts_created = ensure_semantic_artifacts(src_docs, semantic_artifacts_root, tracer)
+        semantic_visualization_paths = ensure_semantic_visualizations(
+            src_docs,
+            semantic_artifacts_root,
+            tracer,
+        )
         layout_analyzer = LayoutAnalyzer()
 
         src_docs_parsed = []
@@ -887,6 +930,16 @@ def create_document(
             "run_completed",
             {"output_dir": output_dir},
         )
+        result_paths = [
+            Path(output_dir) / "debug_write_output.txt",
+            *(Path(output_dir) / f"debug_finish_{i + 1}.png" for i in range(len(target_doc_images))),
+            *semantic_visualization_paths,
+        ]
+        existing_result_paths = [path.resolve() for path in result_paths if path.exists()]
+        if existing_result_paths:
+            print("Generated result files:")
+            for path in existing_result_paths:
+                print(str(path))
     except Exception as exc:
         tracer.event(
             "create_document",
@@ -902,13 +955,13 @@ if __name__ == "__main__":
     load_dotenv()
 
     # 옵션 0, 1, 2 중 원하시는 기능을 선택해서 실행하세요.
-    option = 4
+    option = 2
 
     if option == 0:
         create_document(None, ["financial2"], "financial1")
     elif option == 1:
         create_document(
-            "financial2 문서를 기반으로 KMW 기업 분석 보고서 작성해줘", ["financial2", "financial3"], "financial1", debug_trace=True
+            "financial2 문서를 기반으로 KMW 기업 분석 보고서 작성해줘", ["financial2"], "financial1", debug_trace=True
         )
     elif option == 2:
         create_document(

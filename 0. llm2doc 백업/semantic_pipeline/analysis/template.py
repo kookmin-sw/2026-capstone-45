@@ -3,11 +3,11 @@ from statistics import median
 from typing import Dict, List, Sequence, Tuple
 
 from .archetypes import TEXT_LIKE_LABELS
-from .types import CanonicalBlock, FusedPage, ImageSlot, PageAnalysis, SectionOrderItem, UnsupportedBlock
-from .utils import area_ratio, infer_alignment, median_or_default, relative_gap
+from ..common.types import CanonicalBlock, CanonicalPage, ImageSlot, PageAnalysis, SectionOrderItem, UnsupportedBlock
+from ..common.utils import area_ratio, infer_alignment, median_or_default, relative_gap
 
 
-def page_specs_from_analysis(pages: Sequence[FusedPage], analyses: Sequence[PageAnalysis]) -> List[Dict[str, object]]:
+def page_specs_from_analysis(pages: Sequence[CanonicalPage], analyses: Sequence[PageAnalysis]) -> List[Dict[str, object]]:
     analysis_map = {analysis.page: analysis for analysis in analyses}
     specs = []
     for page in pages:
@@ -35,7 +35,7 @@ def anchor_pages_from_analyses(analyses: Sequence[PageAnalysis]) -> List[int]:
     return [analysis.page for analysis in analyses if analysis.page_archetype in {"cover_summary", "body_narrative"}]
 
 
-def _narrative_blocks(page: FusedPage) -> List[CanonicalBlock]:
+def _narrative_blocks(page: CanonicalPage) -> List[CanonicalBlock]:
     blocks = []
     for block in page.blocks:
         if not block.text:
@@ -50,7 +50,7 @@ def _narrative_blocks(page: FusedPage) -> List[CanonicalBlock]:
     return blocks
 
 
-def build_section_order(pages: Sequence[FusedPage], anchor_pages: Sequence[int]) -> List[SectionOrderItem]:
+def build_section_order(pages: Sequence[CanonicalPage], anchor_pages: Sequence[int]) -> List[SectionOrderItem]:
     sections: List[SectionOrderItem] = []
     section_index = 0
     anchor_set = set(anchor_pages)
@@ -102,7 +102,7 @@ def build_section_order(pages: Sequence[FusedPage], anchor_pages: Sequence[int])
     return sections
 
 
-def build_style_tokens(pages: Sequence[FusedPage], anchor_pages: Sequence[int], analyses: Sequence[PageAnalysis]) -> Dict[str, object]:
+def build_style_tokens(pages: Sequence[CanonicalPage], anchor_pages: Sequence[int], analyses: Sequence[PageAnalysis]) -> Dict[str, object]:
     anchor_set = set(anchor_pages)
     title_heights = []
     subtitle_heights = []
@@ -158,7 +158,7 @@ def build_style_tokens(pages: Sequence[FusedPage], anchor_pages: Sequence[int], 
     }
 
 
-def build_image_slots(pages: Sequence[FusedPage], anchor_pages: Sequence[int]) -> List[ImageSlot]:
+def build_image_slots(pages: Sequence[CanonicalPage], anchor_pages: Sequence[int]) -> List[ImageSlot]:
     anchor_set = set(anchor_pages)
     slots: List[ImageSlot] = []
     for page in pages:
@@ -185,7 +185,7 @@ def build_image_slots(pages: Sequence[FusedPage], anchor_pages: Sequence[int]) -
     return slots
 
 
-def collect_unsupported_blocks(pages: Sequence[FusedPage]) -> List[UnsupportedBlock]:
+def collect_unsupported_blocks(pages: Sequence[CanonicalPage]) -> List[UnsupportedBlock]:
     unsupported: List[UnsupportedBlock] = []
     for page in pages:
         for block in page.blocks:
@@ -210,7 +210,7 @@ def collect_unsupported_blocks(pages: Sequence[FusedPage]) -> List[UnsupportedBl
     return unsupported
 
 
-def detect_repeating_elements(pages: Sequence[FusedPage]) -> List[Dict[str, object]]:
+def detect_repeating_elements(pages: Sequence[CanonicalPage]) -> List[Dict[str, object]]:
     if len(pages) <= 1:
         return []
     counts = Counter()

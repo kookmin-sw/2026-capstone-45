@@ -4,8 +4,8 @@ import sys
 from pathlib import Path
 from typing import Any, List
 
-from .types import EnginePage, RawEngineBlock
-from .utils import ensure_dir, normalize_bbox
+from ..common.types import EnginePage, PageSource, RawEngineBlock
+from ..common.utils import ensure_dir, normalize_bbox
 
 
 def _ensure_llm2doc_importable(llm2doc_root: str | Path):
@@ -110,21 +110,21 @@ def load_llm2doc_pages(reference_doc_id: str, llm2doc_root: str | Path) -> List[
 
 def build_llm2doc_page_sources(
     reference_doc_id: str, llm2doc_root: str | Path, pages: List[EnginePage]
-) -> List[dict[str, Any]]:
+) -> List[PageSource]:
     root = Path(llm2doc_root).resolve()
     doc_dir = resolve_llm2doc_reference_path(reference_doc_id, root)
-    sources: List[dict[str, Any]] = []
+    sources: List[PageSource] = []
 
     for page in pages:
         sources.append(
-            {
-                "page_number": page.page,
-                "sample_id": page.sample_id,
-                "source_type": "llm2doc",
-                "reference_doc_id": reference_doc_id,
-                "document_dir": str(doc_dir),
-                "image_path": page.source_paths.get("image"),
-            }
+            PageSource(
+                page_number=page.page,
+                sample_id=page.sample_id,
+                source_type="llm2doc",
+                reference_doc_id=reference_doc_id,
+                document_dir=str(doc_dir),
+                image_path=page.source_paths.get("image"),
+            )
         )
 
     return sources

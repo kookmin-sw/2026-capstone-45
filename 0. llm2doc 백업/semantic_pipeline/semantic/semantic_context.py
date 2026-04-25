@@ -3,8 +3,8 @@ from typing import Any, Dict, List, Sequence
 
 from .semantic_schema import DOMAIN_ROLES, GENERIC_ROLES
 from .semantic_types import BlockContextPayload, SemanticConfig
-from .types import CanonicalBlock, FusedPage, PageAnalysis
-from .utils import clean_text
+from ..common.types import CanonicalBlock, CanonicalPage, PageAnalysis
+from ..common.utils import clean_text
 
 
 TEXTUAL_LABELS = {
@@ -99,8 +99,7 @@ def _is_evidence_candidate(block: CanonicalBlock) -> bool:
 def _ocr_label_payload(block: CanonicalBlock) -> Dict[str, Any]:
     engine_raw_labels = dict(block.semantic_hints.get("engine_raw_labels", {}))
     if not engine_raw_labels:
-        for engine_name in block.engine_sources:
-            engine_raw_labels[engine_name] = block.raw_label
+        engine_raw_labels["paddle"] = block.raw_label
     return {
         "primary_raw_label": block.semantic_hints.get("primary_raw_label", block.raw_label),
         "current_raw_label": block.raw_label,
@@ -141,7 +140,7 @@ def _safe_overlap(target: CanonicalBlock, candidate: CanonicalBlock) -> float:
 
 def build_block_context(
     *,
-    page: FusedPage,
+    page: CanonicalPage,
     analysis: PageAnalysis,
     block: CanonicalBlock,
     config: SemanticConfig,
@@ -214,7 +213,7 @@ def build_block_context(
         "bbox_norm": list(block.bbox_norm),
         "reading_order": block.reading_order,
         "text_quality_score": block.text_quality_score,
-        "engine_sources": list(block.engine_sources),
+        "engine_sources": ["paddle"],
         "tags": list(block.tags),
         "flags": list(block.flags),
         "zone_tags": zone_tags,
