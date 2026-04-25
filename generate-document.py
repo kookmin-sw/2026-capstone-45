@@ -14,11 +14,11 @@ def main():
     elif option == 2:
         create_document(
             "삼성전자 관련 데일리 브리핑 작성해 (시장 전체 말고 삼성전자만)",
-            ["blog1", "financial1", "financial3"],
+            ["financial3"],
             "financial2",
         )
     elif option == 3:
-        create_document("이란 전쟁 관련 시황 브리핑 작성해", ["news1"], "financial2")
+        create_document("트럼프 관련 기사로 문서 작성해줘", ["news1"], "financial2")
 
 
 if __name__ == "__main__":
