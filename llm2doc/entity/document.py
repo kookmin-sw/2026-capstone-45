@@ -1,14 +1,12 @@
 import enum
 
 from uuid import UUID
-from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship, WriteOnlyMapped
 from llm2doc.entity.base import Base
-
-if TYPE_CHECKING:
-    from llm2doc.entity.document_image import DocumentImage
-    from llm2doc.entity.file import File
+from llm2doc.entity.document_image import DocumentImage
+from llm2doc.entity.document_log import DocumentLog
+from llm2doc.entity.file import File
 
 
 class DocumentStatus(enum.IntEnum):
@@ -28,4 +26,9 @@ class Document(Base):
     process_log: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
     original_file: Mapped["File"] = relationship("File", lazy="raise_on_sql")
-    images: WriteOnlyMapped["DocumentImage"] = relationship("DocumentImage", lazy="raise_on_sql")
+    images: WriteOnlyMapped["DocumentImage"] = relationship(
+        "DocumentImage", lazy="write_only", cascade="all, delete-orphan"
+    )
+    logs: WriteOnlyMapped["DocumentLog"] = relationship(
+        "DocumentLog", lazy="write_only", cascade="all, delete-orphan", order_by=DocumentLog.doc_log_id
+    )
