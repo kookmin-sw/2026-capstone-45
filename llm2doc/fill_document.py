@@ -4,9 +4,9 @@ from PIL import Image
 from openai import OpenAI
 from beartype import beartype
 
-from .analyze_layout import LayoutAnalyzer
-from .render_image import render_boxes, erase_bounding_box
-from .util import image_as_data_uri
+from llm2doc.analyze_layout import LayoutAnalyzer
+from llm2doc.render_image import render_boxes, erase_bounding_box
+from llm2doc.util import image_as_data_uri
 
 
 FILLABLE_BLOCKS = set(

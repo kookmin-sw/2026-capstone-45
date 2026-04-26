@@ -8,8 +8,7 @@ import json
 from typing import Sequence
 from openai.types.responses.response_input_param import FunctionCallOutput
 
-from .util import image_as_data_uri
-from .analyze_layout import ParsedDocument
+from llm2doc.analyze_layout import ParsedDocument
 
 
 class ToolFetchSourceDocument:

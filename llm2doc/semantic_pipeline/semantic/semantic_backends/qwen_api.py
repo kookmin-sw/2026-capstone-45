@@ -4,7 +4,7 @@ import time
 from typing import Dict, List, Tuple
 from openai import OpenAI
 
-from ..semantic_types import BlockContextPayload, SemanticConfig
+from llm2doc.semantic_pipeline.semantic_types import BlockContextPayload, SemanticConfig
 
 class QwenAPIBackend:
     backend_name = "qwen_api"

@@ -20,9 +20,9 @@ from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from openai import OpenAI
 from openai.types.responses.response_input_param import FunctionCallOutput
 
-from .analyze_layout import LayoutAnalyzer, ParsedDocument
-from .bm25_search import BM25Document, BM25Hit, BM25SearchClient, LocalBM25SearchClient
-from .debug_trace import DecisionTracer
+from llm2doc.analyze_layout import LayoutAnalyzer, ParsedDocument
+from llm2doc.bm25_search import BM25Document, BM25SearchClient, LocalBM25SearchClient
+from llm2doc.debug_trace import DecisionTracer
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
