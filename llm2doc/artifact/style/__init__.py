@@ -1,4 +1,4 @@
-from ._artifact import StyleArtifact
+from ._artifact import StyleArtifact, BlockStyle
 from ._pipeline import StyleArtifactPipeline
 
-__all__ = ["StyleArtifact", "StyleArtifactPipeline"]
+__all__ = ["StyleArtifact", "BlockStyle", "StyleArtifactPipeline"]
