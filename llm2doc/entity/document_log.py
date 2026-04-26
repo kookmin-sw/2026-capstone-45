@@ -17,7 +17,7 @@ class DocumentLog(Base):
     doc_id: Mapped[int] = mapped_column(ForeignKey("document.doc_id", onupdate="CASCADE", ondelete="CASCADE"))
 
     content_text: Mapped[str] = mapped_column()
-    content_file_id: Mapped[UUID] = mapped_column(ForeignKey("file.file_id", onupdate="CASCADE", ondelete="RESTRICT"))
+    content_file_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("file.file_id", onupdate="CASCADE"))
 
     doc: Mapped["Document"] = relationship("Document", lazy="raise_on_sql", back_populates="logs")
     content_file: Mapped[Optional["File"]] = relationship("File", lazy="raise_on_sql")

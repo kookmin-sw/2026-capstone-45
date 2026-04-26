@@ -21,7 +21,7 @@ class Document(Base):
 
     doc_id: Mapped[int] = mapped_column(primary_key=True)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
-    original_file_id: Mapped[UUID] = mapped_column(ForeignKey("file.file_id"), nullable=False)
+    original_file_id: Mapped[UUID] = mapped_column(ForeignKey("file.file_id", onupdate="CASCADE"), nullable=False)
     process_status: Mapped[DocumentStatus] = mapped_column(Integer, nullable=False, default=DocumentStatus.PENDING)
     process_log: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
