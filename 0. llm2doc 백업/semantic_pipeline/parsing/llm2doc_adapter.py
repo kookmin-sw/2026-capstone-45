@@ -50,7 +50,7 @@ def load_llm2doc_pages(reference_doc_id: str, llm2doc_root: str | Path) -> List[
     image_names = _source_image_names(doc_dir)
     LayoutAnalyzer = _ensure_llm2doc_importable(root)
 
-    analyzer = LayoutAnalyzer(data_root=root / "data")
+    analyzer = LayoutAnalyzer()
     parsed = analyzer(reference_doc_id)
 
     if len(parsed.pages) != len(image_names):

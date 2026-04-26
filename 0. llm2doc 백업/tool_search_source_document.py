@@ -882,7 +882,7 @@ class ToolSearchSourceDocument:
                 model_name=os.environ["OPENAI_EMBED_MODEL"],
             )
 
-            layout_analyzer = LayoutAnalyzer(data_root=DATA_ROOT)
+            layout_analyzer = LayoutAnalyzer()
             all_docs = _list_source_documents(DATA_ROOT)
 
             self.chroma = chromadb.RustClient(path="debug_chromadb_cache")

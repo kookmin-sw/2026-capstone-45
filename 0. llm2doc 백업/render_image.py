@@ -1,10 +1,3 @@
-"""구조화된 텍스트/HTML을 실제 문서 이미지 위에 다시 그리는 모듈.
-
-텍스트는 Skia로 직접 그려 넣고, 표 같은 HTML 조각은 html2image를 통해
-브라우저 렌더링 결과를 다시 합성한다. 즉, 이 파일은 LLM이 만든 문서 내용을
-원본 레이아웃 위에 시각적으로 복원하는 마지막 단계에 가깝다.
-"""
-
 import os
 import math
 import uuid
@@ -17,25 +10,23 @@ import skia
 
 from PIL import Image, ImageDraw
 from beartype import beartype
-from typing import Sequence, cast
+from typing import Sequence, cast, TYPE_CHECKING
+from rich.progress import track
 from html2image import Html2Image
 from concurrent.futures import Future, ThreadPoolExecutor
 
+if TYPE_CHECKING:
+    import llm2doc.analyze_layout
 
 COLOR_PRIOR = "green"
 COLOR_SELECTED = "blue"
 COLOR_NEXT = "red"
 
 LINE_WIDTH = 2
-
-# CSS-like ordered font stack
-FONT_FAMILIES = ["Noto Sans CJK KR", "Arial", "sans-serif"]
+DEFAULT_FONT = "./data/font/malgun.ttf"
 
 OVERFLOW_VISIBLE = False
 
-# Access textlayout directly through the skia module
-FONT_COLLECTION = skia.textlayout.FontCollection()
-FONT_COLLECTION.setDefaultFontManager(skia.FontMgr())
 UNICODE = skia.Unicodes.ICU.Make()
 
 # Thread-local storage to hold per-thread Html2Image instances
@@ -43,7 +34,6 @@ thread_local = threading.local()
 
 
 def _create_html2image_instance():
-    """현재 환경에서 사용 가능한 브라우저(chrome/edge)를 찾아 Html2Image를 만든다."""
     tempdir = tempfile.gettempdir()
     tempdir = os.path.join(tempdir, uuid.uuid4().hex)
 
@@ -58,9 +48,7 @@ def _create_html2image_instance():
         pass
 
     try:
-        return Html2Image(
-            browser="edge", temp_path=tempdir, output_path=tempdir, disable_logging=True
-        )
+        return Html2Image(browser="edge", temp_path=tempdir, output_path=tempdir, disable_logging=True)
     except FileNotFoundError:
         pass
 
@@ -68,7 +56,7 @@ def _create_html2image_instance():
 
 
 def _init_thread():
-    """HTML 렌더링 워커 스레드마다 브라우저 인스턴스를 독립적으로 준비한다."""
+    """Initializes thread-local storage for the thread pool worker."""
     thread_local.hti = _create_html2image_instance()
 
 
@@ -77,68 +65,68 @@ def render_single_text(
     image: Image.Image,
     bbox: Sequence[int | float],
     text: str,
-    extend_bbox: bool = False,
+    block_info: "llm2doc.analyze_layout.BlockInfo | None",
 ) -> Image.Image:
-    """단일 텍스트 블록을 주어진 박스 안에 최대한 크게 맞춰 그린다."""
-    if extend_bbox:
+    if block_info is not None and block_info.style is not None:
+        style = block_info.style
+    else:
+        style = None
+
+    if len(text.strip()) == 0:
+        return image
+
+    if style is not None and style.line_count == 1:
         bbox = _extend_bounding_box(image, bbox)
 
     x_min, y_min, x_max, y_max = map(int, bbox)
 
     img_arr = np.asarray(image.convert("RGB"))
-    bg_color = np.median(img_arr[y_min:y_max, x_min:x_max], axis=(0, 1))
-    if np.mean(bg_color) < 127:
-        text_color = skia.ColorWHITE
+
+    if style is not None:
+        r, g, b = style.color
+        text_color = skia.Color4f(r / 255, g / 255, b / 255, 1.0)
     else:
-        text_color = skia.ColorBLACK
-
-    abs_width = x_max - x_min
-    abs_height = y_max - y_min
-
-    box_width = int(abs_width)
-    box_height = int(abs_height)
-
-    def create_paragraph(
-        text_content: str, font_size: float
-    ) -> skia.textlayout.Paragraph:
-        para_style = skia.textlayout.ParagraphStyle()
-        text_style = skia.textlayout.TextStyle()
-        text_style.setColor(text_color)
-        text_style.setFontSize(font_size)
-        text_style.setFontFamilies(FONT_FAMILIES)
-
-        builder = skia.textlayout.ParagraphBuilder(para_style, FONT_COLLECTION, UNICODE)
-        builder.pushStyle(text_style)
-        builder.addText(text_content)
-
-        paragraph = builder.Build()
-        return paragraph
-
-    min_size = 1.0
-    max_size = float(max(box_width, box_height))
-    best_size = min_size
-    final_paragraph = None
-
-    # 박스에 들어갈 수 있는 최대 글자 크기를 빠르게 찾기 위해 이진 탐색을 사용한다.
-    for _ in range(100):
-        mid_size = (min_size + max_size) / 2
-        para = create_paragraph(text, mid_size)
-
-        para.layout(box_width)
-
-        if para.Height <= box_height and para.MinIntrinsicWidth <= box_width:
-            best_size = mid_size
-            min_size = mid_size
-            final_paragraph = para
+        bg_color = np.median(img_arr[y_min:y_max, x_min:x_max], axis=(0, 1))
+        if np.mean(bg_color) < 128:
+            text_color = skia.ColorWHITE
         else:
-            max_size = mid_size
+            text_color = skia.ColorBLACK
 
-    if not extend_bbox and box_height * 0.9 <= best_size:
-        return render_single_text(image, bbox, text, True)
+    font_size = style.font_size if style is not None else 128
 
-    if final_paragraph is None:
-        final_paragraph = create_paragraph(text, best_size)
-        final_paragraph.layout(box_width)
+    box_width = int(x_max - x_min)
+    box_height = int(y_max - y_min)
+
+    font_path = DEFAULT_FONT
+    if style is not None:
+        font_path = style.font_family
+
+    typeface = skia.Typeface.MakeFromFile(font_path)
+    if not typeface:
+        typeface = skia.Typeface.MakeFromFile(DEFAULT_FONT)
+
+    family_name = typeface.getFamilyName() if typeface else "sans-serif"
+
+    font_provider = skia.textlayout.TypefaceFontProvider()
+    if typeface:
+        font_provider.registerTypeface(typeface, family_name)
+
+    font_collection = skia.textlayout.FontCollection()
+    font_collection.setDefaultFontManager(font_provider)
+
+    para_style = skia.textlayout.ParagraphStyle()
+    text_style = skia.textlayout.TextStyle()
+    text_style.setColor(text_color)
+    text_style.setFontSize(font_size)
+
+    text_style.setFontFamilies([family_name])
+
+    builder = skia.textlayout.ParagraphBuilder(para_style, font_collection, UNICODE)
+    builder.pushStyle(text_style)
+    builder.addText(text)
+
+    paragraph = builder.Build()
+    paragraph.layout(box_width)
 
     surface = skia.Surface.MakeRasterN32Premul(box_width, box_height)
     canvas = surface.getCanvas()
@@ -147,7 +135,7 @@ def render_single_text(
         clip_rect = skia.Rect.MakeWH(box_width, box_height)
         canvas.clipRect(clip_rect, skia.ClipOp.kIntersect, True)
 
-    final_paragraph.paint(canvas, 0, 0)
+    paragraph.paint(canvas, 0, 0)
 
     snapshot = surface.makeImageSnapshot()
     image_array = snapshot.toarray(
@@ -167,11 +155,13 @@ def _render_html_fragment(
     box_width: int,
     box_height: int,
     bg_color: str,
-    line_height: float,
+    block_info: "llm2doc.analyze_layout.BlockInfo",
 ) -> Image.Image | None:
-    """HTML 조각을 독립된 작은 문서로 감싸 브라우저로 캡처한다."""
     if box_width <= 0 or box_height <= 0:
         return None
+
+    style = block_info.style
+    assert style is not None
 
     styled_html = f"""
     <html>
@@ -180,7 +170,8 @@ def _render_html_fragment(
             body {{
                 overflow: hidden;
                 background-color: #{bg_color};
-                font-size: {line_height:.4f}px;
+                font-size: {style.font_size:.4f}px;
+                line-height: {style.line_height}px;
                 width: {box_width}px;
                 height: {box_height}px;
                 min-width: {box_width}px;
@@ -203,6 +194,10 @@ def _render_html_fragment(
             table {{
                 width: 100%;
             }}
+            table, th, td {{
+                border: 1px solid black;
+                border-collapse: collapse;
+            }}
         </style>
     </head>
     <body>
@@ -213,7 +208,7 @@ def _render_html_fragment(
 
     temp_filename = f"temp_render_{uuid.uuid4().hex}.png"
 
-    # 스레드별로 분리된 Html2Image 인스턴스를 사용해야 충돌을 피할 수 있다.
+    # Use the thread-local Html2Image instance
     final_filename = thread_local.hti.screenshot(
         html_str=styled_html, save_as=temp_filename, size=(box_width, box_height)
     )[0]
@@ -232,16 +227,16 @@ def _draw_html(
     image: Image.Image,
     bboxes: Sequence[Sequence[int | float]],
     html: Sequence[str | None],
-    line_height: Sequence[float],
+    block_info: Sequence["llm2doc.analyze_layout.BlockInfo"],
 ) -> Image.Image:
-    """여러 HTML 블록을 병렬로 렌더링해 원본 이미지에 덮어쓴다."""
     if len(bboxes) < len(html):
         raise IndexError("length of html_fragments exceeds length of bboxes")
 
     rgb_image = image.convert("RGB")
     img_arr = np.array(rgb_image)
 
-    cpu_count = os.cpu_count() or 4
+    cpu_count = os.cpu_count() or 1
+    cpu_count *= 16
     tasks = cast(list[tuple[Future, int, int]], [])
 
     with ThreadPoolExecutor(max_workers=cpu_count, initializer=_init_thread) as exe:
@@ -267,12 +262,12 @@ def _draw_html(
                 box_width,
                 box_height,
                 bg_color,
-                line_height[i],
+                block_info[i],
             )
 
             tasks.append((future, x_min, y_min))
 
-        for i, (future, x_min, y_min) in enumerate(tasks):
+        for i, (future, x_min, y_min) in enumerate(track(tasks, description="Rendering HTML...")):
             html_image = future.result()
 
             if html_image is not None:
@@ -335,10 +330,15 @@ def _draw_striped_rectangle(
 @beartype
 def erase_bounding_box(image: Image.Image, bbox: list) -> Image.Image:
     """
-    이미지 안의 특정 박스를 주변 색의 중앙값으로 메워 지운다.
+    Erases an axis-aligned bounding box from a Pillow Image by filling it
+    with the median color of the surrounding neighborhood.
 
-    완전한 인페인팅은 아니지만, 기존 텍스트를 덮기 전에 배경색을 자연스럽게
-    복원하는 용도로는 충분하다.
+    Args:
+        image: Original PIL Image.
+        bbox: List or tuple of [xmin, ymin, xmax, ymax].
+
+    Returns:
+        A new PIL Image with the bounding box erased.
     """
     MIN_PIXEL_DIM = 10  # Minimum total gap between large and small boxes
     PIXEL_DIM_RATIO = 0.10  # Ratio of box dimensions to expand/shrink
@@ -382,11 +382,18 @@ def erase_bounding_box(image: Image.Image, bbox: list) -> Image.Image:
 
 
 @beartype
-def _extend_bounding_box(
-    image: Image.Image, bbox: Sequence[int | float]
-) -> list[int | float]:
+def _extend_bounding_box(image: Image.Image, bbox: Sequence[int | float]) -> list[int | float]:
     """
-    텍스트 박스의 오른쪽 여백이 같은 배경색으로 이어질 때만 bbox를 확장한다.
+    Extends the bounding box to the right as long as the right border is a uniform color.
+    Terminates if any pixel on the right border differs in color (even before extending),
+    or if it reaches page_margin pixels from the right edge of the image.
+
+    Args:
+        image: Original PIL Image.
+        bbox: Sequence of [xmin, ymin, xmax, ymax].
+
+    Returns:
+        A new bounding box list with the extended xmax.
     """
 
     PAGE_MARGIN = 8
@@ -397,7 +404,7 @@ def _extend_bounding_box(
     img_arr = np.array(rgb_image)
     img_height, img_width = img_arr.shape[:2]
 
-    # 이미지 밖 좌표나 비정상 박스는 그대로 반환한다.
+    # Handle edge cases (invalid bounds, negative sizes)
     if xmax <= 0 or xmax > img_width or ymin < 0 or ymax > img_height or ymin >= ymax:
         return list(bbox)
 
@@ -428,10 +435,9 @@ def render_boxes(
     bboxes: Sequence[Sequence[int | float]],
     text: Sequence[str | None] | None = None,
     html: Sequence[str | None] | None = None,
-    line_height: Sequence[float] | None = None,
+    block_info: Sequence["llm2doc.analyze_layout.BlockInfo"] | None = None,
     selected: int | None = None,
 ):
-    """디버그 박스, 텍스트, HTML 조각을 한 번에 이미지 위에 렌더링한다."""
     image = image.convert("RGBA")
     draw = ImageDraw.Draw(image)
 
@@ -457,12 +463,30 @@ def render_boxes(
     del draw
 
     if text is not None:
-        for bbox, t in zip(bboxes, text):
+        for bbox, t, blk in zip(bboxes, text, block_info or [None] * len(bboxes)):
             if t is not None:
-                image = render_single_text(image, bbox, t)
+                image = render_single_text(image, bbox, t, blk)
 
     if html is not None:
-        assert line_height is not None
-        image = _draw_html(image, bboxes, html, line_height)
+        assert block_info is not None
+        # image = _draw_html(image, bboxes, html, block_info)
 
     return image
+
+
+def main():
+    img = Image.new("RGB", (800, 800))
+    bbox = (100, 100, 700, 500)
+    img = render_single_text(img, bbox, "Hello, world!", None)
+
+    draw = ImageDraw.ImageDraw(img)
+    draw.rectangle(bbox)
+
+    import matplotlib.pyplot as plt
+
+    plt.imshow(np.asarray(img))
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

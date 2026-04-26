@@ -27,7 +27,7 @@ from .tool_fetch_source_document import ToolFetchSourceDocument
 from .tool_search_source_document import ToolSearchSourceDocument
 
 RESULT_OUTPUT_ROOT = r"C:\Users\echin\Desktop\ALLLM\llm-to-document\output"
-RESULT_OUTPUT_DIR_NAME = "integrate_financial1_financial2"
+RESULT_OUTPUT_DIR_NAME: str | None = "integrate2_news1_financial2_test"
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 WORKSPACE_ROOT = PROJECT_ROOT.parent
@@ -760,7 +760,7 @@ def create_document(
     if target_doc not in datas:
         raise FileNotFoundError(f"target document data/{target_doc} does not exist")
 
-    output_dir_name = RESULT_OUTPUT_DIR_NAME or "__".join(src_docs)
+    output_dir_name = RESULT_OUTPUT_DIR_NAME or f"{'_'.join(src_docs)}_{target_doc}"
     output_dir = os.path.join(RESULT_OUTPUT_ROOT, output_dir_name)
     os.makedirs(output_dir, exist_ok=True)
     semantic_artifacts_root = Path(output_dir) / SEMANTIC_ARTIFACTS_DIRNAME
@@ -850,13 +850,6 @@ def create_document(
         htmls = [
             [cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages
         ]
-        line_heights = [
-            [
-                float(getattr(block, "line_height", 16.0))
-                for block in page.blocks
-            ]
-            for page in target_doc_parsed.pages
-        ]
 
         # LLM이 반환한 최종 문서 문자열에서 블록별 텍스트/테이블 HTML을 추출한다.
         soup = BeautifulSoup(imagine.strip(), "lxml")
@@ -915,7 +908,7 @@ def create_document(
                 bboxes[i],
                 texts[i],
                 htmls[i],
-                line_heights[i],
+                target_doc_parsed.pages[i].blocks,
             )
 
             img.save(os.path.join(output_dir, f"debug_finish_{i + 1}.png"))
@@ -955,7 +948,7 @@ if __name__ == "__main__":
     load_dotenv()
 
     # 옵션 0, 1, 2 중 원하시는 기능을 선택해서 실행하세요.
-    option = 2
+    option = 1
 
     if option == 0:
         create_document(None, ["financial2"], "financial1")

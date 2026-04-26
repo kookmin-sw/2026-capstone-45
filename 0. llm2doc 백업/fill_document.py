@@ -1,10 +1,3 @@
-"""문서를 박스 단위로 순차 생성하는 초기 버전 실험 코드.
-
-현재 메인 파이프라인은 `create_document.py` 계열이지만, 이 파일은
-각 박스를 개별 LLM 호출로 채우는 방식이 어떻게 동작했는지 보여주는
-이전 접근법의 흔적이다.
-"""
-
 import os
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
@@ -83,10 +76,7 @@ def invoke_llm(
     blue_box_coords: list[int],
     blue_box_page: int,
 ):
-    """단일 박스를 채우기 위한 멀티모달 프롬프트를 만들고 LLM을 호출한다."""
-    fill_prompt = FILL_PROMPT.format(
-        blue_box_coords=blue_box_coords, blue_box_page=blue_box_page
-    )
+    fill_prompt = FILL_PROMPT.format(blue_box_coords=blue_box_coords, blue_box_page=blue_box_page)
 
     content = [
         {
@@ -95,7 +85,7 @@ def invoke_llm(
         },
     ]
 
-    # 참고 문서 이미지는 "원래 어떤 스타일/배치였는지"를 알려주는 기준 역할을 한다.
+    # Reference document with boxes
     for i, img in enumerate(target):
         content.extend(
             [
@@ -110,7 +100,7 @@ def invoke_llm(
             ]
         )
 
-    # 현재 작성 중인 문서 스냅샷은 이미 채운 칸과 아직 비어 있는 칸을 보여준다.
+    # The screenshot of document currently being written
     for i, img in enumerate(rendered):
         content.extend(
             [
@@ -171,8 +161,7 @@ def fill_single_box(
     bbox_idx: int,
     index: int,
 ):
-    """한 개의 bbox에 대해 입력 이미지를 준비하고 텍스트를 생성한다."""
-    # 원본 이미지 위에 색상 박스를 덧그려 LLM이 레이아웃 기준을 파악하게 한다.
+    # Render boxes onto original image
     target_imgs: list[Image.Image] = []
     for i, blk in enumerate(page_blocks):
         if page == i:
@@ -184,7 +173,7 @@ def fill_single_box(
         img = render_boxes(img, blk, selected=selected)
         target_imgs.append(img)
 
-    # 배경만 남긴 이미지에도 동일한 박스를 그려 실제 작성 대상 위치를 보여준다.
+    # Render boxes onto erased image
     rendered_imgs: list[Image.Image] = []
     for i, blk in enumerate(page_blocks):
         if page == i:
@@ -200,7 +189,7 @@ def fill_single_box(
 
     blue_box_coords = page_blocks[page][bbox_idx]
 
-    # 좌표는 모델 프롬프트에서 0~1000 상대 좌표계로 전달한다.
+    # Qwen VL format
     width = images[page].width
     height = images[page].height
     blue_box_coords = [
@@ -229,7 +218,6 @@ def fill_document(
     desired_content: str,
     target_doc: str,
 ):
-    """문서 전체의 fillable block을 병렬로 채워 보는 실험용 엔트리포인트."""
     print("[WARN] This code should not be used")
 
     layout_analyzer = LayoutAnalyzer()
@@ -240,17 +228,14 @@ def fill_document(
     del layout_analyzer
 
     page_blocks = [
-        [block.bbox for block in page.blocks if block.label in FILLABLE_BLOCKS]
-        for page in target_layout.pages
+        [block.bbox for block in page.blocks if block.label in FILLABLE_BLOCKS] for page in target_layout.pages
     ]
 
-    image_paths = [
-        x for x in os.listdir(f"data/{target_doc}") if x.startswith("original")
-    ]
+    image_paths = [x for x in os.listdir(f"data/{target_doc}") if x.startswith("original")]
     image_paths.sort()
     images = [Image.open(f"data/{target_doc}/{x}") for x in image_paths]
 
-    # 먼저 기존 텍스트를 지운 빈 캔버스를 만들어, 생성 결과만 다시 올릴 준비를 한다.
+    # Erase image
     erased_images = []
     for blk, img in zip(page_blocks, images):
         img = img.copy()
