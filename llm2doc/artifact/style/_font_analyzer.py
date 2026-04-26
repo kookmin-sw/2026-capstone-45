@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from beartype import beartype
 from typing import Sequence, Self
 from PIL import Image, ImageFont, ImageDraw
-from skimage.morphology import skeletonize
 from collections import OrderedDict
 from fontTools.ttLib import TTFont
 

@@ -187,8 +187,8 @@ def ensure_semantic_artifacts(
     artifacts_root: Path,
     tracer: DecisionTracer | None = None,
 ) -> bool:
-    from llm2doc.semantic_pipeline.pipeline.reference_pipeline import parse_reference
-    from llm2doc.semantic_pipeline.semantic.semantic_types import SemanticConfig
+    from llm2doc.artifact.semantic.pipeline.reference_pipeline import parse_reference
+    from llm2doc.artifact.semantic.semantic.semantic_types import SemanticConfig
 
     created_any = False
 
@@ -233,7 +233,7 @@ def ensure_semantic_visualizations(
     artifacts_root: Path,
     tracer: DecisionTracer | None = None,
 ) -> list[Path]:
-    from llm2doc.semantic_pipeline.visualization.visualize import render_reference_visualization
+    from llm2doc.artifact.semantic.visualization.visualize import render_reference_visualization
 
     visualization_paths: list[Path] = []
 
