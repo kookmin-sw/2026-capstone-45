@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from .semantic_types import RoleDecision
+from llm2doc.semantic_pipeline.semantic.semantic_types import RoleDecision
 
 
 GENERIC_ROLES = (

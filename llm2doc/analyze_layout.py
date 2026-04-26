@@ -24,10 +24,10 @@ from paddlex.inference.models.text_detection.result import TextDetResult
 from tesserocr import OEM, PSM, RIL
 from rich.progress import Progress
 
-from .util import validate_type
-from .render_image import render_boxes
-from .font_analyzer import FontAnalyzer, FontAnalysisResult
-from .tesseract import download_tessdata, TesseractFleet
+from llm2doc.util import validate_type
+from llm2doc.render_image import render_boxes
+from llm2doc.font_analyzer import FontAnalyzer, FontAnalysisResult
+from llm2doc.tesseract import download_tessdata, TesseractFleet
 
 
 REGEX_NEWLINE = re.compile(r"[\r\n]+")
