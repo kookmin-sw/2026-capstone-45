@@ -22,7 +22,9 @@ class StyleArtifactPipeline(ArtifactPipeline[StyleArtifact]):
     ARTIFACT_NAME = "StyleArtifact"
     INPUT_ARTIFACTS = ["OCRArtifact"]
 
-    def __init__(self):
+    def __init__(self, ctx):
+        super().__init__(ctx)
+
         download_tessdata()
         self.tesseract_line = TesseractFleet(path="./tessdata", lang="eng+kor", oem=OEM.DEFAULT, psm=PSM.SINGLE_LINE)
         self.tesseract_char = TesseractFleet(path="./tessdata", lang="eng+kor", oem=OEM.DEFAULT, psm=PSM.SINGLE_CHAR)

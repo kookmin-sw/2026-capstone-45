@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import ForeignKey, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship, WriteOnlyMapped
 from llm2doc.entity.base import Base
+from llm2doc.entity.artifact import Artifact
 from llm2doc.entity.document_image import DocumentImage
 from llm2doc.entity.document_log import DocumentLog
 from llm2doc.entity.file import File
@@ -25,11 +26,24 @@ class Document(Base):
     process_status: Mapped[DocumentStatus] = mapped_column(Integer, nullable=False, default=DocumentStatus.PENDING)
     process_log: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
-    original_file: Mapped["File"] = relationship("File", lazy="raise_on_sql")
-    images: WriteOnlyMapped["DocumentImage"] = relationship(
-        "DocumentImage", lazy="write_only", back_populates="doc", cascade="all, delete-orphan", passive_deletes=True
+    original_file: Mapped[File] = relationship("File", lazy="raise_on_sql")
+    images: WriteOnlyMapped[DocumentImage] = relationship(
+        "DocumentImage",
+        lazy="write_only",
+        back_populates="doc",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by=DocumentImage.display_order,
     )
-    logs: WriteOnlyMapped["DocumentLog"] = relationship(
+    artifacts: WriteOnlyMapped[Artifact] = relationship(
+        "Artifact",
+        lazy="write_only",
+        back_populates="doc",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by=Artifact.artifact_id,
+    )
+    logs: WriteOnlyMapped[DocumentLog] = relationship(
         "DocumentLog",
         lazy="write_only",
         back_populates="doc",

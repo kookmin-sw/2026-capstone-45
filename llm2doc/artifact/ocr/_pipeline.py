@@ -32,7 +32,7 @@ class OCRArtifactPipeline(ArtifactPipeline[OCRArtifact]):
             layout_nms=True,
         )
 
-    def process_sync(self, document: DocumentContext) -> OCRArtifact:
+    def process(self, document: DocumentContext) -> OCRArtifact:
         pages = []
         for img in document.images:
             img = img.convert("RGB")
@@ -75,8 +75,7 @@ class OCRArtifactPipeline(ArtifactPipeline[OCRArtifact]):
                     )
                 )
 
-            if 1 + 1 == 2:
-                raise RuntimeError("check markdown_images")
+            # TODO: Handle markdown_images
 
             parsed_pages.append(
                 OCRPage(

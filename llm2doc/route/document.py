@@ -42,7 +42,7 @@ async def get_document_image(db: WithDB, doc_id: int, page: int):
 
 
 @router.post("")
-async def create_document(file: Annotated[UploadFile, File()], db: WithDB, thread_pool: WithThreadPool):
+async def create_document(file: Annotated[UploadFile, File()], db: WithDB):
     if file.filename is None:
         raise HTTPException(status_code=400, detail="Uploaded file lacks filename")
 
@@ -82,19 +82,22 @@ async def create_document(file: Annotated[UploadFile, File()], db: WithDB, threa
     await db.flush()
 
     doc_id = validate_type(await doc.awaitable_attrs.doc_id, int)
-    asyncio.create_task(create_document_worker(db.bind, thread_pool, doc_id, file_id, file_type))
+    asyncio.create_task(create_document_worker(db.bind, doc_id, file_id, file_type))
 
     return {"id": doc_id}
 
 
-@router.delete("/{doc}")
-def delete_document(doc: str):
-    os.removedirs(f"data/{doc}")
+@router.post("/{doc_id}/artifacts/rebuild")
+async def rebuild_artifact(doc_id: int, db: WithDB):
+    from llm2doc.artifact.run import build_artifact
+
+    engine = validate_type(db.bind, AsyncEngine)
+    await build_artifact(engine, [doc_id])
+
+    return {}
 
 
-async def create_document_worker(
-    engine: Any, thread_pool: ThreadPoolExecutor, doc_id: int, file_id: uuid.UUID, file_type: str
-):
+async def create_document_worker(engine: Any, doc_id: int, file_id: uuid.UUID, file_type: str):
     engine = validate_type(engine, AsyncEngine)
 
     async def add_images(img_ids: list[uuid.UUID]):

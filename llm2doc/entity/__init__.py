@@ -9,7 +9,7 @@ from .document import Document, DocumentStatus
 from .file import File
 
 
-DB_SCHEMA_VERSION = 2
+DB_SCHEMA_VERSION = 3
 
 
 async def create_schema(conn: AsyncConnection):

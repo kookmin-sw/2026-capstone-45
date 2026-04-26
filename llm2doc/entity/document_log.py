@@ -14,9 +14,11 @@ class DocumentLog(Base):
     __tablename__ = "document_log"
 
     doc_log_id: Mapped[int] = mapped_column(primary_key=True)
-    doc_id: Mapped[int] = mapped_column(ForeignKey("document.doc_id", onupdate="CASCADE", ondelete="CASCADE"))
+    doc_id: Mapped[int] = mapped_column(
+        ForeignKey("document.doc_id", onupdate="CASCADE", ondelete="CASCADE"), nullable=False
+    )
 
-    content_text: Mapped[str] = mapped_column()
+    content_text: Mapped[str] = mapped_column(nullable=False)
     content_file_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("file.file_id", onupdate="CASCADE"))
 
     doc: Mapped["Document"] = relationship("Document", lazy="raise_on_sql", back_populates="logs")

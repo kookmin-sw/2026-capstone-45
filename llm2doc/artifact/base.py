@@ -25,14 +25,14 @@ class ArtifactPipeline(ABC, Generic[OUT]):
     INPUT_ARTIFACTS: ClassVar[Sequence[str]]
     """이 아티팩트를 생성하기 위해 입력으로 받는 아티팩트들의 이름"""
 
-    ctx: PipelineContext
+    ctx: "PipelineContext"
 
-    def __init__(self, ctx: PipelineContext):
+    def __init__(self, ctx: "PipelineContext"):
         super().__init__()
         self.ctx = ctx
 
     @abstractmethod
-    def process(self, document: DocumentContext) -> OUT: ...
+    def process(self, document: "DocumentContext") -> OUT: ...
 
     def dispose(self):
         pass
