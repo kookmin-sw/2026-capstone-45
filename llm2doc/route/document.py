@@ -17,6 +17,7 @@ from llm2doc.util import validate_type
 from llm2doc.dependency import WithDB, WithThreadPool
 from llm2doc.entity import DocumentStatus, File as FileRow, Document, DocumentImage
 from llm2doc.dto.document import DocumentListEntry
+from llm2doc.repository.artifact import clear_artifacts
 from llm2doc.repository.document import list_all_documents, load_document, load_document_image
 
 
@@ -90,6 +91,8 @@ async def create_document(file: Annotated[UploadFile, File()], db: WithDB):
 @router.post("/{doc_id}/artifacts/rebuild")
 async def rebuild_artifact(doc_id: int, db: WithDB):
     from llm2doc.artifact.run import build_artifact
+
+    await clear_artifacts(db, doc_id)
 
     engine = validate_type(db.bind, AsyncEngine)
     await build_artifact(engine, [doc_id])

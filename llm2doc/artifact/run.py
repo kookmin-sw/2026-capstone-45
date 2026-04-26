@@ -15,6 +15,7 @@ from llm2doc.artifact.style import StyleArtifactPipeline
 from llm2doc.context.document import DocumentContext
 from llm2doc.context.pipeline import PipelineContext
 from llm2doc.entity import Document
+from llm2doc.repository.artifact import load_artifact, save_artifact
 from llm2doc.util import join_thread_async
 
 
@@ -31,17 +32,24 @@ def _build_artifact_inner(
     file_paths: Sequence[Sequence[str]],
     artifacts: Sequence[dict[str, BaseModel]],
 ):
-    images = [Image.open(x) for pages in file_paths for x in pages]
+    images = [[Image.open(x) for x in pages] for pages in file_paths]
 
     for pipeline in PIPELINES:
+        if all(pipeline.ARTIFACT_NAME in doc_artifacts for doc_artifacts in artifacts):
+            continue
+
         now = pipeline(pipeline_ctx)
         try:
             for doc_id, pages, doc_artifacts in zip(doc_ids, images, artifacts):
                 if any(x not in doc_artifacts for x in pipeline.INPUT_ARTIFACTS):
                     raise ValueError("PIPELINES order is invalid")
+
+                if pipeline.ARTIFACT_NAME in doc_artifacts:
+                    continue
+
                 doc = DocumentContext(
                     doc_id=doc_id,
-                    images=images,
+                    images=pages,
                     artifacts=doc_artifacts,
                 )
                 result = now.process(doc)
@@ -62,17 +70,22 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
             thread_pool=exe,
         )
 
-        artifacts: list[dict[str, BaseModel]] = [dict() for _ in doc_ids]
-        file_paths: list[list[str]] = [[] for _ in doc_ids]
+        artifacts: list[dict[str, BaseModel]] = []
+        file_paths: list[list[str]] = []
 
         async with pipeline_ctx.with_db() as db:
-            for doc_id in doc_ids:
+            for i, doc_id in enumerate(doc_ids):
                 doc = await db.get_one(Document, doc_id)
                 image_rows = (await db.execute(doc.images.select())).scalars().all()
                 file_ids = [x.file_id for x in image_rows]
+
+                artifacts.append(dict())
                 file_paths.append([f"file/{x}" for x in file_ids])
 
-                # TODO: Load artifacts
+                for pipeline in PIPELINES:
+                    loaded = await load_artifact(db, doc_id, pipeline)
+                    if loaded is not None:
+                        artifacts[i][pipeline.ARTIFACT_NAME] = loaded
 
         thread = Thread(target=_build_artifact_inner, args=(pipeline_ctx, doc_ids, file_paths, artifacts))
         thread.start()
@@ -80,5 +93,6 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
         await join_thread_async(thread)
 
         async with pipeline_ctx.with_db() as db:
-            # TODO: Store artifacts
-            pass
+            for i, doc_id in enumerate(doc_ids):
+                for name, value in artifacts[i].items():
+                    await save_artifact(db, doc_id, name, value)

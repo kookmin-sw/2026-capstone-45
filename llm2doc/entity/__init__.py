@@ -2,6 +2,7 @@ from sqlalchemy import select, insert
 from sqlalchemy.exc import OperationalError, NoResultFound
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncConnection
 
+from .artifact import Artifact
 from .config import Config
 from .document_image import DocumentImage
 from .document_log import DocumentLog
@@ -41,4 +42,4 @@ async def init_schema(db: AsyncEngine):
             )
 
 
-__all__ = ["Config", "DocumentImage", "DocumentLog", "Document", "DocumentStatus", "File", "init_schema"]
+__all__ = ["Artifact", "Config", "DocumentImage", "DocumentLog", "Document", "DocumentStatus", "File", "init_schema"]
