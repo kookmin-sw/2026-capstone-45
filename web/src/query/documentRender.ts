@@ -29,11 +29,15 @@ const RenderedDocument = z.object({
 
 export type TRenderedDocument = z.infer<typeof RenderedDocument>;
 
-export const useQueryRenderedDocument = (id: string) =>
+export const useQueryRenderedDocument = (
+	chatId: string,
+	enabled: boolean = false,
+) =>
 	useQuery({
-		queryKey: [id],
+		queryKey: [chatId],
+		enabled: enabled,
 		queryFn: async () => {
-			const response = await fetch(`/api/rendered/${id}`);
+			const response = await fetch(`/api/chats/${chatId}/render`);
 			if (!response.ok) {
 				throw new Error("Network response was not ok");
 			}

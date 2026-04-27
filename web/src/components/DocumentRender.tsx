@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import {
 	type TRenderedPage,
 	useQueryRenderedDocument,
@@ -71,17 +72,43 @@ const renderPages = (pages: TRenderedPage[], zoom: number) => {
 };
 
 function DocumentRender() {
-	const zoom = 0.5;
-	const doc = useQueryRenderedDocument("temp_id");
+	const [zoom, setZoom] = useState(500);
+	const [chatId, setChatId] = useState("");
+	const doc = useQueryRenderedDocument(chatId, chatId !== "");
 
-	if (!doc.isSuccess) {
-		return null;
-	}
+	const renderedPages = useMemo(() => {
+		if (!doc.isSuccess) {
+			return null;
+		}
+
+		return renderPages(doc.data.pages, zoom / 1000);
+	}, [doc, zoom]);
 
 	return (
-		<div style={{ backgroundColor: "#ddd", padding: "1px" }}>
-			{renderPages(doc.data.pages, zoom)}
-		</div>
+		<>
+			<div>
+				<span>채팅 ID: </span>
+				<input
+					style={{ border: "1px solid #000" }}
+					value={chatId}
+					onChange={(e) => setChatId(e.target.value)}
+				/>
+				<span style={{ marginLeft: "1rem" }}>줌:&nbsp;</span>
+				<button
+					type="button"
+					onClick={() => setZoom((x) => Math.max(x - 25, 25))}
+				>
+					-
+				</button>
+				<button type="button" onClick={() => setZoom((x) => x + 25)}>
+					+
+				</button>
+				<span>&nbsp;{zoom / 1000}x</span>
+			</div>
+			<div style={{ backgroundColor: "#ddd", padding: "1px" }}>
+				{renderedPages}
+			</div>
+		</>
 	);
 }
 
