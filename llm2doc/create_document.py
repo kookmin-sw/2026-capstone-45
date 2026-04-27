@@ -1,28 +1,28 @@
 import os
 import re
 import json
+import asyncio
+
 from pathlib import Path
 from pydantic import BaseModel
 from PIL import Image
-from openai import OpenAI
+from openai import AsyncOpenAI
 from beartype import beartype
 from bs4 import BeautifulSoup
 from typing import Sequence, Any, cast
 from openai.types.responses.response_input_param import ResponseInputParam
 
-from llm2doc.analyze_layout import LayoutAnalyzer, ParsedDocument
+from llm2doc.artifact.ocr import OCRArtifact, OCRArtifactPipeline
+from llm2doc.artifact.style import StyleArtifact, StyleArtifactPipeline
+from llm2doc.artifact.run import build_artifact, get_or_build_artifact
+from llm2doc.context.write import WriteContext
 from llm2doc.render_image import render_document, render_page, RenderedPage
-from llm2doc.debug_trace import DecisionTracer, resolve_debug_trace
+from llm2doc.dummy_tracer import DummyTracer
 from llm2doc.tool_fetch_source_document import ToolFetchSourceDocument
 from llm2doc.tool_search_source_document import ToolSearchSourceDocument
-
-
-RESULT_OUTPUT_ROOT = "./"
-RESULT_OUTPUT_DIR_NAME: str | None = "integrate2_news1_financial2"
-PACKAGE_ROOT = Path(__file__).resolve().parent
-PROJECT_ROOT = PACKAGE_ROOT.parent
-WORKSPACE_ROOT = PROJECT_ROOT.parent
-SEMANTIC_ARTIFACTS_DIRNAME = "semantic_artifacts"
+from llm2doc.repository.artifact import load_artifact
+from llm2doc.repository.document import load_document_image_all
+from llm2doc.repository.file import get_file_path
 
 
 PROMPT_WRITE = """
@@ -170,23 +170,28 @@ PROMPT_FINAL_DOCUMENT_RETRY = (
 
 
 def _semantic_artifact_dir(artifacts_root: Path, doc_id: str) -> Path:
+    raise RuntimeError("todo")
     return artifacts_root / f"{doc_id}-00" / "01_reference"
 
 
 def _has_semantic_artifact(artifacts_root: Path, doc_id: str) -> bool:
+    raise RuntimeError("todo")
     artifact_dir = _semantic_artifact_dir(artifacts_root, doc_id)
     return (artifact_dir / "canonical_pages.json").exists() and (artifact_dir / "semantic_overlay.json").exists()
 
 
 def _semantic_visualization_path(artifacts_root: Path, doc_id: str) -> Path:
+    raise RuntimeError("todo")
     return _semantic_artifact_dir(artifacts_root, doc_id) / "reference_visualization.html"
 
 
 def ensure_semantic_artifacts(
     doc_ids: Sequence[str],
     artifacts_root: Path,
-    tracer: DecisionTracer | None = None,
+    tracer: DummyTracer | None = None,
 ) -> bool:
+    return False
+
     from llm2doc.artifact.semantic.pipeline.reference_pipeline import parse_reference
     from llm2doc.artifact.semantic.semantic.semantic_types import SemanticConfig
 
@@ -226,40 +231,6 @@ def ensure_semantic_artifacts(
             )
 
     return created_any
-
-
-def ensure_semantic_visualizations(
-    doc_ids: Sequence[str],
-    artifacts_root: Path,
-    tracer: DecisionTracer | None = None,
-) -> list[Path]:
-    from llm2doc.artifact.semantic.visualization.visualize import render_reference_visualization
-
-    visualization_paths: list[Path] = []
-
-    for doc_id in doc_ids:
-        artifact_dir = _semantic_artifact_dir(artifacts_root, doc_id)
-        if not artifact_dir.exists():
-            continue
-
-        output_path = _semantic_visualization_path(artifacts_root, doc_id)
-        render_reference_visualization(
-            artifact_dir=str(artifact_dir),
-            output_path=str(output_path),
-        )
-        visualization_paths.append(output_path)
-
-        if tracer is not None:
-            tracer.event(
-                "semantic_artifacts",
-                "visualization_ready",
-                {
-                    "document_id": doc_id,
-                    "visualization_path": str(output_path),
-                },
-            )
-
-    return visualization_paths
 
 
 def pydantic_encoder(obj):
@@ -471,25 +442,22 @@ def normalize_analysis_payload(
     }
 
 
-def maybe_generate_analysis(
-    client: OpenAI,
+async def maybe_generate_analysis(
+    ctx: WriteContext,
+    client: AsyncOpenAI,
     input_items: ResponseInputParam,
     query: str,
-    source_doc_ids: Sequence[str],
-    tracer: DecisionTracer,
+    tracer: DummyTracer,
     *,
     component: str,
 ) -> dict[str, Any] | None:
-    if not tracer.enabled:
-        return None
-
     tracer.event(
         component,
         "analysis_requested",
-        {"source_documents": list(source_doc_ids)},
+        {"source_documents": ctx.source_doc_ids},
     )
-    analysis_prompt = PROMPT_ANALYZE_TRACE.format(source_documents=", ".join(source_doc_ids))
-    response = client.responses.create(
+    analysis_prompt = PROMPT_ANALYZE_TRACE.format(source_documents=", ".join([str(x) for x in ctx.source_doc_ids]))
+    response = await client.responses.create(
         model=os.environ["OPENAI_MODEL"],
         input=input_items
         + [
@@ -499,6 +467,10 @@ def maybe_generate_analysis(
             }
         ],
     )
+    await ctx.append_log("analysis_response", response.model_dump_json())
+
+    # TODO
+    return
     tracer.save_json("llm/analysis_response.json", response_to_jsonable(response))
 
     analysis = normalize_analysis_payload(
@@ -518,15 +490,15 @@ def maybe_generate_analysis(
     return analysis
 
 
-def request_final_document(
-    client: OpenAI,
+async def request_final_document(
+    ctx: WriteContext,
+    client: AsyncOpenAI,
     input_items: ResponseInputParam,
-    tracer: DecisionTracer,
+    tracer: DummyTracer,
     *,
     component: str,
-    output_dir: str | None = None,
 ) -> str:
-    final_input = list(input_items)
+    final_input: list[Any] = list(input_items)
     prompt_text = PROMPT_FINAL_DOCUMENT
     last_output_text = ""
 
@@ -538,7 +510,7 @@ def request_final_document(
                 "content": [{"type": "input_text", "text": prompt_text}],
             }
         )
-        response = client.responses.create(
+        response = await client.responses.create(
             model=os.environ["OPENAI_MODEL"],
             input=final_input,
         )
@@ -546,15 +518,10 @@ def request_final_document(
 
         output_text = extract_response_text(response)
         last_output_text = output_text
-        if output_dir is not None:
-            with open(os.path.join(output_dir, "debug_write_output.txt"), "wt", encoding="utf-8") as f:
-                f.write(output_text)
+        await ctx.append_log("write_output", file=output_text)
 
         extracted_document = extract_document_block(output_text)
         if extracted_document is not None:
-            if output_dir is not None:
-                with open(os.path.join(output_dir, "debug_write_output.txt"), "wt", encoding="utf-8") as f:
-                    f.write(extracted_document)
             tracer.event(
                 component,
                 "final_document_saved",
@@ -567,27 +534,23 @@ def request_final_document(
             "final_document_invalid",
             {"attempt": attempt, "preview": output_text[:500]},
         )
-        final_input += response.output  # type: ignore
+        final_input += response.output
         prompt_text = PROMPT_FINAL_DOCUMENT_RETRY
 
-    if output_dir is not None and last_output_text:
-        with open(os.path.join(output_dir, "debug_write_output.txt"), "wt", encoding="utf-8") as f:
-            f.write(last_output_text)
+    await ctx.append_log("write_output", file=last_output_text)
     raise RuntimeError("LLM did not return a valid <document> block after retries.")
 
 
 @beartype
-def write_document(
-    client: OpenAI,
+async def write_document(
+    ctx: WriteContext,
+    client: AsyncOpenAI,
     query: str,
-    src_docs: Sequence[ParsedDocument],
-    target_doc: ParsedDocument,
-    output_dir: str,
-    semantic_artifacts_root: Path,
-    tracer: DecisionTracer,
+    src_docs: Sequence[OCRArtifact],
+    target_doc: OCRArtifact,
+    tracer: DummyTracer,
     *,
     component: str,
-    force_rebuild_search_index: bool = False,
 ) -> str:
     """LLM과 도구 호출 루프를 돌며 최종 문서 블록을 생성한다."""
     imagine_prompt = PROMPT_WRITE.strip().format(
@@ -595,18 +558,15 @@ def write_document(
         target=target_doc.to_sturctured_html(doc_id="target"),
     )
 
-    with open(os.path.join(output_dir, "debug_write_input.txt"), "wt", encoding="utf-8") as f:
-        f.write(imagine_prompt)
+    await ctx.append_log("imagine_prompt", file=imagine_prompt)
 
     # 모델이 사용할 수 있는 도구는 "원문 검색"과 "특정 페이지 조회" 두 종류다.
-    tools = [
+    tools: list[Any] = [
         ToolFetchSourceDocument(src_docs),
         ToolSearchSourceDocument(
-            [x.id for x in src_docs],
+            src_docs,
             client=client,
             tracer=tracer,
-            artifacts_root=semantic_artifacts_root,
-            force_rebuild=force_rebuild_search_index,
         ),
     ]
 
@@ -622,20 +582,17 @@ def write_document(
         }
     ]
 
-    response_cnt = 0
-
     while True:
-        response = client.responses.create(
+        await ctx.append_log("llm_api_response", json.dumps(input))
+
+        response = await client.responses.create(
             model=os.environ["OPENAI_MODEL"],
             input=input,
             tools=[x.description for x in tools],
             tool_choice="auto",
         )
-        response_cnt += 1
-        tracer.save_json(
-            f"llm/tool_loop_response_{response_cnt}.json",
-            response_to_jsonable(response),
-        )
+
+        await ctx.append_log("llm_api_response", response.model_dump_json())
 
         for item in response.output:
             try:
@@ -647,7 +604,7 @@ def write_document(
             except Exception:
                 pass
 
-        input += response.output  # type: ignore
+        input += response.model_dump(mode="python")["output"]
 
         tool_calls = [
             item for item in response.output if item.type == "function_call" and item.call_id not in fulfiled_tool_calls
@@ -676,7 +633,7 @@ def write_document(
                 raise RuntimeError(f"unable to find tool for {tool_call}")
 
             fulfiled_tool_calls.add(tool_call.call_id)
-            result = tool.invoke(tool_call.arguments, tool_call.call_id)
+            result = await tool.invoke(tool_call.arguments, tool_call.call_id)
             input.append(result)
             tracer.event(
                 component,
@@ -688,30 +645,25 @@ def write_document(
                 },
             )
 
-    maybe_generate_analysis(
+    await maybe_generate_analysis(
+        ctx,
         client,
         input,
         query,
-        [doc.id for doc in src_docs],
         tracer,
         component=component,
     )
-    final_document_text = request_final_document(
+    final_document_text = await request_final_document(
+        ctx,
         client,
         input,
         tracer,
         component=component,
-        output_dir=output_dir,
     )
 
-    with open(os.path.join(output_dir, "debug_write_input.json"), "wt", encoding="utf-8") as f:
-        json.dump(input, f, default=pydantic_encoder)
-
-    with open(os.path.join(output_dir, "debug_write_output.txt"), "wt", encoding="utf-8") as f:
-        f.write(final_document_text)
-
-    with open(os.path.join(output_dir, "debug_write_reason.txt"), "wt", encoding="utf-8") as f:
-        f.write("\n----------\n".join(reasoning))
+    await ctx.append_log("debug_write_input", file=json.dumps(input, default=pydantic_encoder))
+    await ctx.append_log("debug_write_output", file=final_document_text)
+    await ctx.append_log("debug_write_reason", file="\n----------\n".join(reasoning))
 
     print("Generation finished successfully.")
 
@@ -719,179 +671,131 @@ def write_document(
 
 
 @beartype
-def create_document(
+async def create_document(
+    ctx: WriteContext,
     query: str | None,
-    src_docs: list[str],
-    target_doc: str,
-    debug_trace: bool | None = None,
 ):
     """문서 생성부터 결과 이미지 렌더링까지 전체 작업을 수행한다."""
     if query is None:
         query = "소스 문서 내용을 기반으로 작성해줘."
 
-    # 필요한 파일들이 존재하는지 확인
-    # 입력으로 받은 문서 ID가 실제 `data` 폴더 안에 존재하는지 먼저 확인한다.
-    datas = os.listdir("data")
+    # output_dir_name = RESULT_OUTPUT_DIR_NAME or f"{'_'.join(src_docs)}_{target_doc}"
+    # output_dir = os.path.join(RESULT_OUTPUT_ROOT, output_dir_name)
+    # os.makedirs(output_dir, exist_ok=True)
+    # semantic_artifacts_root = Path(output_dir) / SEMANTIC_ARTIFACTS_DIRNAME
 
-    for src_doc in src_docs:
-        if src_doc not in datas:
-            raise FileNotFoundError(f"source document data/{src_doc} does not exist")
-
-    if target_doc not in datas:
-        raise FileNotFoundError(f"target document data/{target_doc} does not exist")
-
-    output_dir_name = RESULT_OUTPUT_DIR_NAME or f"{'_'.join(src_docs)}_{target_doc}"
-    output_dir = os.path.join(RESULT_OUTPUT_ROOT, output_dir_name)
-    os.makedirs(output_dir, exist_ok=True)
-    semantic_artifacts_root = Path(output_dir) / SEMANTIC_ARTIFACTS_DIRNAME
-    tracer = DecisionTracer.create(
-        output_dir,
-        enabled=resolve_debug_trace(debug_trace),
-    )
+    tracer = DummyTracer.create()
     tracer.event(
         "create_document",
         "run_started",
         {
             "query": query,
-            "src_docs": src_docs,
-            "target_doc": target_doc,
-            "output_dir": output_dir,
+            # "src_docs": src_docs,
+            # "target_doc": target_doc,
+            # "output_dir": output_dir,
         },
     )
-    artifacts_created = False
-    semantic_visualization_paths: list[Path] = []
 
-    try:
-        # 문서 불러와서 파싱
-        # 소스/타깃 문서를 모두 OCR 구조로 로딩한다.
-        artifacts_created = ensure_semantic_artifacts(src_docs, semantic_artifacts_root, tracer)
-        semantic_visualization_paths = ensure_semantic_visualizations(
-            src_docs,
-            semantic_artifacts_root,
-            tracer,
-        )
-        layout_analyzer = LayoutAnalyzer()
+    # 문서 불러와서 파싱
+    # 소스/타깃 문서를 모두 OCR 구조로 로딩한다.
 
-        src_docs_parsed = []
+    # TODO
+    # semantic_visualization_paths = ensure_semantic_visualizations(
+    #     src_docs,
+    #     semantic_artifacts_root,
+    #     tracer,
+    # )
 
-        for src_doc in src_docs:
-            document = layout_analyzer(src_doc)
-            src_docs_parsed.append(document)
+    await build_artifact(ctx.pipeline_ctx.engine, [ctx.target_doc_id, *ctx.source_doc_ids])
 
-        target_doc_parsed = layout_analyzer(target_doc)
+    src_docs_parsed: list[OCRArtifact] = []
 
-        tracer.event(
-            "create_document",
-            "layout_loaded",
-            {
-                "source_docs": [{"document_id": doc.id, "page_count": len(doc.pages)} for doc in src_docs_parsed],
-                "target_doc": {
-                    "document_id": target_doc_parsed.id,
-                    "page_count": len(target_doc_parsed.pages),
-                },
-            },
-        )
+    for src_doc in ctx.source_doc_ids:
+        ocr = await get_or_build_artifact(ctx.pipeline_ctx.engine, src_doc, OCRArtifactPipeline)
+        src_docs_parsed.append(ocr)
 
-        layout_analyzer.dispose()
-        del layout_analyzer
+    target_doc_parsed: OCRArtifact = await get_or_build_artifact(
+        ctx.pipeline_ctx.engine, ctx.target_doc_id, OCRArtifactPipeline
+    )
+    target_doc_style: StyleArtifact = await get_or_build_artifact(
+        ctx.pipeline_ctx.engine, ctx.target_doc_id, StyleArtifactPipeline
+    )
 
-        # LLM에게 문서를 작성시킴
-        # 문서 생성 자체는 Responses API를 쓰는 LLM 호출 루프에서 처리한다.
-        client = OpenAI(base_url=os.environ["OPENAI_BASE_URL"])
+    async with ctx.pipeline_ctx.with_db() as db:
+        file_entities = await load_document_image_all(db, ctx.target_doc_id)
+        file_ids = [x.file_id for x in file_entities]
 
-        target_doc_image_names = os.listdir(f"data/{target_doc}/")
-        target_doc_image_names.sort()
-        target_doc_images = [
-            Image.open(f"data/{target_doc}/{x}") for x in target_doc_image_names if x.startswith("original")
-        ]
+    target_doc_images = await asyncio.to_thread(lambda: [Image.open(get_file_path(x)) for x in file_ids])
 
-        imagine = write_document(
-            client,
-            query,
-            src_docs_parsed,
-            target_doc_parsed,
-            output_dir,
-            semantic_artifacts_root,
-            tracer,
-            component="create_document",
-            force_rebuild_search_index=artifacts_created,
-        )
+    # LLM에게 문서를 작성시킴
+    # 문서 생성 자체는 Responses API를 쓰는 LLM 호출 루프에서 처리한다.
+    client = AsyncOpenAI(base_url=os.environ["OPENAI_BASE_URL"], api_key=os.environ["OPENAI_API_KEY"])
 
-        # 작성한 문서를 렌더링함
-        texts = [[cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages]
-        htmls = [[cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages]
+    imagine = await write_document(
+        ctx,
+        client,
+        query,
+        src_docs_parsed,
+        target_doc_parsed,
+        tracer,
+        component="create_document",
+    )
 
-        # LLM이 반환한 최종 문서 문자열에서 블록별 텍스트/테이블 HTML을 추출한다.
-        soup = BeautifulSoup(imagine.strip(), "lxml")
-        document = soup.find("document")
-        assert document is not None, (
-            "LLM이 <document> 형식의 최종 문서를 생성하지 않았습니다. "
-            "debug_write_output.txt와 debug_write_reason.txt를 확인하세요."
-        )
+    # 작성한 문서를 렌더링함
+    htmls = [[cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages]
 
-        for i, page in enumerate(document.find_all("page", recursive=False)):
-            for j, block in enumerate(page.find_all("div", recursive=False)):
-                m = REGEX_DIV_ID.match(str(block.attrs["id"]))
-                if m is None:
-                    continue
+    # LLM이 반환한 최종 문서 문자열에서 블록별 텍스트/테이블 HTML을 추출한다.
+    soup = BeautifulSoup(imagine.strip(), "lxml")
+    document = soup.find("document")
+    assert document is not None, "LLM이 <document> 형식의 최종 문서를 생성하지 않았습니다."
 
-                block_page = int(m[1]) - 1
-                block_idx = int(m[2]) - 1
+    for i, page in enumerate(document.find_all("page", recursive=False)):
+        for j, block in enumerate(page.find_all("div", recursive=False)):
+            m = REGEX_DIV_ID.match(str(block.attrs["id"]))
+            if m is None:
+                continue
 
-                if len(texts) <= block_page or len(texts[block_page]) <= block_idx:
-                    print(f"[WARN] Invalid div: {block}")
-                    continue
+            block_page = int(m[1]) - 1
+            block_idx = int(m[2]) - 1
 
-                if block.find("img") is not None:
-                    print(f"[WARN] Ignoring div containing img: {block}")
-                    # texts[block_page][block_idx] = "[이미지]"
-                    continue
+            if block_page < 0 or len(htmls) <= block_page or block_idx < 0 or len(htmls[block_page]) <= block_idx:
+                print(f"[WARN] Invalid div: {block}")
+                continue
 
-                htmls[block_page][block_idx] = block.decode_contents()
+            if block.find("img") is not None:
+                print(f"[WARN] Ignoring div containing img: {block}")
+                # texts[block_page][block_idx] = "[이미지]"
+                continue
 
-        tracer.event(
-            "create_document",
-            "render_started",
-            {"page_count": len(target_doc_images)},
+            htmls[block_page][block_idx] = block.decode_contents()
+
+    tracer.event(
+        "create_document",
+        "render_started",
+        {"page_count": len(target_doc_images)},
+    )
+
+    rendered_pages: list[RenderedPage] = []
+
+    for i, (page, img) in enumerate(zip(target_doc_parsed.pages, target_doc_images)):
+        rendered_pages.append(
+            await asyncio.to_thread(render_page, page, img, htmls[i], target_doc_style.pages[i], f"page-{i + 1}")
         )
 
-        rendered_pages: list[RenderedPage] = []
+    rendered_doc = render_document(rendered_pages)
 
-        for i, (page, img) in enumerate(zip(target_doc_parsed.pages, target_doc_images)):
-            rendered_pages.append(render_page(page, img, htmls[i], f"page-{i + 1}"))
+    with open("debug_final.json", "wt", encoding="utf-8") as f:
+        f.write(rendered_doc.model_dump_json(indent=2))
 
-        rendered_doc = render_document(rendered_pages)
-        rendered_doc_json = rendered_doc.model_dump_json()
-        with open(os.path.join(output_dir, "debug_finish.json"), "wt", encoding="utf-8") as f:
-            f.write(rendered_doc_json)
+    # tracer.event(
+    #     "create_document",
+    #     "render_completed",
+    #     {"page_count": len(target_doc_images)},
+    # )
+    # tracer.event(
+    #     "create_document",
+    #     "run_completed",
+    #     {"output_dir": output_dir},
+    # )
 
-        tracer.event(
-            "create_document",
-            "render_completed",
-            {"page_count": len(target_doc_images)},
-        )
-        tracer.event(
-            "create_document",
-            "run_completed",
-            {"output_dir": output_dir},
-        )
-        result_paths = [
-            Path(output_dir) / "debug_write_output.txt",
-            Path(output_dir) / "debug_finish.json",
-            *semantic_visualization_paths,
-        ]
-        existing_result_paths = [path.resolve() for path in result_paths if path.exists()]
-        if existing_result_paths:
-            print("Generated result files:")
-            for path in existing_result_paths:
-                print(str(path))
-
-        return rendered_doc
-
-    except Exception as exc:
-        tracer.event(
-            "create_document",
-            "run_failed",
-            {"error": str(exc), "error_type": type(exc).__name__},
-        )
-        raise
+    return rendered_doc

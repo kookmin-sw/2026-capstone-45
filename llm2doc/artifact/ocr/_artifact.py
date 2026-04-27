@@ -64,8 +64,8 @@ class OCRPage(BaseModel):
     width: int
     height: int
     blocks: list[OCRBlock]
-    json: str
-    markdown: str
+    content_json: str
+    content_markdown: str
 
     def __str__(self):
         content = "\n\n".join([f"Block #{i}\n{blk}" for i, blk in enumerate(self.blocks)])

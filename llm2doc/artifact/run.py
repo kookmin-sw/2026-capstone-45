@@ -3,11 +3,11 @@ import os
 
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor
-from typing import Sequence, Type
+from typing import Sequence, Type, TypeVar
 from beartype import beartype
 from pydantic import BaseModel
 from PIL import Image
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from llm2doc.artifact.base import ArtifactPipeline
 from llm2doc.artifact.ocr import OCRArtifactPipeline
@@ -96,3 +96,24 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
             for i, doc_id in enumerate(doc_ids):
                 for name, value in artifacts[i].items():
                     await save_artifact(db, doc_id, name, value)
+
+
+T = TypeVar("T", bound=BaseModel)
+
+
+async def get_or_build_artifact(engine: AsyncEngine, doc_id: int, pipeline: Type[ArtifactPipeline[T]]) -> T:
+    async with AsyncSession(engine) as db:
+        async with db.begin():
+            loaded = await load_artifact(db, doc_id, pipeline)
+            if loaded is not None:
+                return loaded
+
+    await build_artifact(engine, [doc_id])
+
+    async with AsyncSession(engine) as db:
+        async with db.begin():
+            loaded = await load_artifact(db, doc_id, pipeline)
+            if loaded is not None:
+                return loaded
+
+    raise RuntimeError(f"Failed to build artifact {pipeline.ARTIFACT_NAME} for document {doc_id}")

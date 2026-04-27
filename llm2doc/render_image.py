@@ -8,8 +8,9 @@ from typing import Sequence
 from pydantic import BaseModel
 from beartype import beartype
 
-from .analyze_layout import ParsedPage
-from .font import PathToFontFamily
+from llm2doc.artifact.ocr import OCRArtifact, OCRPage
+from llm2doc.artifact.style import StyleArtifact, BlockStyle
+from llm2doc.font import PathToFontFamily
 
 
 class RenderedBlock(BaseModel):
@@ -139,7 +140,13 @@ def _extend_bounding_box(image: Image.Image, bbox: Sequence[int | float]) -> lis
 
 
 @beartype
-def render_page(page: ParsedPage, img: Image.Image, htmls: Sequence[str | None], page_id: str) -> RenderedPage:
+def render_page(
+    page: OCRPage,
+    img: Image.Image,
+    htmls: Sequence[str | None],
+    styles: Sequence[BlockStyle | None],
+    page_id: str,
+) -> RenderedPage:
     font_mapper = PathToFontFamily()
     blocks: list[RenderedBlock] = []
 
@@ -159,14 +166,15 @@ def render_page(page: ParsedPage, img: Image.Image, htmls: Sequence[str | None],
         font_size = line_height
         color = "#000"
 
-        if block.style is not None:
+        block_style = styles[i]
+        if block_style is not None:
             # TODO: line_height왜 이렇게 들어가는지 확인
-            line_height = (block.bbox[3] - block.bbox[1]) / block.style.line_count
-            font_family = font_mapper.path_to_font(block.style.font_family)
-            font_size = block.style.font_size
-            color = block.style.color_css
+            line_height = (block.bbox[3] - block.bbox[1]) / block_style.line_count
+            font_family = font_mapper.path_to_font(block_style.font_family)
+            font_size = block_style.font_size
+            color = block_style.color_css
 
-            can_extend = block.style.line_count == 1 or block.content.strip().count("\n") + 1 == block.style.line_count
+            can_extend = block_style.line_count == 1 or block.content.strip().count("\n") + 1 == block_style.line_count
 
         if can_extend:
             bbox = _extend_bounding_box(img, bbox)

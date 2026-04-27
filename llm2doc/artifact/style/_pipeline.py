@@ -38,7 +38,7 @@ class StyleArtifactPipeline(ArtifactPipeline[StyleArtifact]):
         self.tesseract_char.__enter__()
         self.tesseract_line.__enter__()
 
-    def process(self, document):
+    def process(self, document) -> StyleArtifact:
         from llm2doc.artifact.ocr import OCRArtifactPipeline
 
         ocr_doc = document.get_artifact(OCRArtifactPipeline)

@@ -24,6 +24,7 @@ def _ensure_llm2doc_importable(llm2doc_root: str | Path):
 
 
 def resolve_llm2doc_reference_path(reference_doc_id: str, llm2doc_root: str | Path) -> Path:
+    raise RuntimeError("todo")
     data_dir = Path(llm2doc_root).resolve() / "data" / reference_doc_id
     if not data_dir.exists():
         raise FileNotFoundError(f"llm2doc document directory does not exist: {data_dir}")

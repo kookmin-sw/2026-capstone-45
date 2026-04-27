@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from llm2doc.entity import init_schema
+from llm2doc.route.chat import router as chat
 from llm2doc.route.document import router as document
 from llm2doc.route.font import router as font
 
@@ -37,17 +38,9 @@ async def health():
     return {"health": "ok"}
 
 
-@api_router.get("/rendered/{doc_id}")
-async def rendered_document(doc_id: str):
-    path = f"./rendered/{doc_id}.json"
-    # if not os.path.exists(path):
-    #     raise HTTPException(status_code=404)
-
-    return FileResponse("debug_finish.json")
-
-
 api_router.include_router(document)
 api_router.include_router(font)
+api_router.include_router(chat)
 app.include_router(api_router)
 
 

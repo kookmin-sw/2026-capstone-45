@@ -82,8 +82,8 @@ class OCRArtifactPipeline(ArtifactPipeline[OCRArtifact]):
                     width=document.images[i].width,
                     height=document.images[i].height,
                     blocks=blocks,
-                    json=as_json,
-                    markdown=as_markdown["markdown_texts"],
+                    content_json=as_json,
+                    content_markdown=as_markdown["markdown_texts"],
                 )
             )
 

@@ -1,3 +1,4 @@
+from typing import Sequence
 from sqlalchemy import select, func
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,5 +58,20 @@ async def load_document_image(db: AsyncSession, doc: Document, page: int) -> Fil
     result = await db.execute(stmt)
     try:
         return result.scalar_one()
+    except NoResultFound:
+        raise HTTPException(404, "no such page found")
+
+
+async def load_document_image_all(db: AsyncSession, doc_id: int) -> Sequence[File]:
+    stmt = (
+        select(File)
+        .join(DocumentImage, File.file_id == DocumentImage.file_id)
+        .where(DocumentImage.doc_id == doc_id)
+        .order_by(DocumentImage.display_order, DocumentImage.file_id)
+    )
+
+    result = await db.execute(stmt)
+    try:
+        return result.scalars().all()
     except NoResultFound:
         raise HTTPException(404, "no such page found")
