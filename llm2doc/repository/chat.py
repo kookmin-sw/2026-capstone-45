@@ -30,14 +30,3 @@ async def append_chat_message(
     )
 
     db.add(msg)
-
-
-async def append_chat_internal_log(
-    db: AsyncSession,
-    chat_id: int,
-    text: str,
-    file: str | bytes | IOBase | None = None,
-    *,
-    is_markdown: bool = False,
-):
-    await append_chat_message(db, chat_id, MessageDepth.INTERNAL, text, file, is_markdown=is_markdown)

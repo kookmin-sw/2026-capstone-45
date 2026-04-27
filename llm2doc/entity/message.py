@@ -30,6 +30,9 @@ class MessageDepth(enum.IntEnum):
     INTERNAL = 60
     """시스템 내부적으로 생성한 로그"""
 
+    TRACE = 70
+    """JSON 형태로 된 trace 로그"""
+
 
 class Message(Base):
     __tablename__ = "message"
