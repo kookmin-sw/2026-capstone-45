@@ -1,14 +1,20 @@
 import asyncio
 
+from uuid import UUID
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
+from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncEngine
 from pydantic import BaseModel
 
 from llm2doc.context.pipeline import PipelineContext
 from llm2doc.context.write import WriteContext
 from llm2doc.dependency import WithDB, WithThreadPool
-from llm2doc.repository.chat import create_chat
+from llm2doc.entity import Chat
+from llm2doc.entity.message import MessageDepth
+from llm2doc.repository.chat import create_chat, load_chat_message_all, load_rendered_document
 from llm2doc.repository.document import check_document_exists
+from llm2doc.repository.file import get_file_path
 from llm2doc.util import validate_type
 
 
@@ -19,6 +25,22 @@ class CreateChatRequest(BaseModel):
     target_doc: int
     source_docs: list[int]
     query: str
+
+
+class ChatMessageEntry(BaseModel):
+    depth: MessageDepth
+    content: str
+    is_markdown: bool
+    extra_content: str | None
+
+
+class ChatDetailResponse(BaseModel):
+    display_name: str
+    has_render: bool
+    progress: float | None
+    target_doc: int
+    source_docs: list[int]
+    messages: list[ChatMessageEntry]
 
 
 @router.post("")
@@ -45,4 +67,61 @@ async def create_chat_route(db: WithDB, thread_pool: WithThreadPool, body: Creat
         source_doc_ids=body.source_docs,
     )
 
-    await create_document(ctx, body.query)
+    asyncio.create_task(create_document(ctx, body.query))
+
+    return {"chat_id": chat_id}
+
+
+@router.get("/{chat_id}")
+async def get_chat_detail(db: WithDB, chat_id: int):
+    try:
+        chat = await db.get_one(Chat, chat_id)
+    except NoResultFound:
+        raise HTTPException(404, "chat not found")
+
+    source_docs = (await db.execute(chat.source_docs.select())).scalars().all()
+
+    def load_file(file_id: UUID):
+        try:
+            with open(get_file_path(file_id), "rt", encoding="utf-8") as f:
+                return f.read()
+        except Exception:
+            return None
+
+    # TODO: message pagination
+    messages: list[ChatMessageEntry] = []
+
+    async for msg in load_chat_message_all(db, chat_id):
+        if msg.content_file_id is not None:
+            file_content = await asyncio.to_thread(load_file, msg.content_file_id)
+        else:
+            file_content = None
+
+        messages.append(
+            ChatMessageEntry(
+                depth=msg.depth,
+                content=msg.content_text,
+                is_markdown=msg.is_markdown,
+                extra_content=file_content,
+            )
+        )
+
+    return ChatDetailResponse(
+        display_name=chat.display_name,
+        has_render=chat.rendered_file_id is not None,
+        progress=None,
+        target_doc=chat.target_doc_id,
+        source_docs=[x.doc_id for x in source_docs],
+        messages=messages,
+    )
+
+
+@router.get("/{chat_id}/render")
+async def get_chat_rendered_document(db: WithDB, chat_id: int):
+    file_id = await load_rendered_document(db, chat_id)
+    if file_id is None:
+        raise HTTPException(500, "document not yet ready")
+
+    file_path = get_file_path(file_id)
+
+    return FileResponse(file_path, media_type="text/json")
