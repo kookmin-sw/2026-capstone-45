@@ -26,7 +26,7 @@ class WriteContext:
         asyncio.run_coroutine_threadsafe(self.append_log(message, file), loop=self.pipeline_ctx.loop)
 
     async def append_trace(self, message: object):
-        msg = json.dumps(message)
+        msg = json.dumps(message, ensure_ascii=False)
 
         async with self.pipeline_ctx.with_db() as db:
             await append_chat_message(db, self.chat_id, MessageDepth.TRACE, msg, None)

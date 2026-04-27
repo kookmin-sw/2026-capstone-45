@@ -38,6 +38,15 @@ async def list_all_documents(db: AsyncSession) -> list[DocumentListEntry]:
     return result
 
 
+async def check_document_exists(db: AsyncSession, doc_ids: Sequence[int]):
+    stmt = select(func.count(Document.doc_id)).where(Document.doc_id.in_(doc_ids))
+
+    result = await db.execute(stmt)
+    count = result.scalar_one()
+
+    return count == len(doc_ids)
+
+
 async def load_document(db: AsyncSession, doc_id: int) -> Document:
     try:
         return await db.get_one(Document, doc_id)

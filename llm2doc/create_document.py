@@ -526,7 +526,7 @@ async def write_document(
     ]
 
     while True:
-        await ctx.append_log("llm_api_response", json.dumps(input))
+        await ctx.append_log("llm_api_response", json.dumps(input, ensure_ascii=False, indent=2))
 
         response = await client.responses.create(
             model=os.environ["OPENAI_MODEL"],
@@ -602,7 +602,9 @@ async def write_document(
         component=component,
     )
 
-    await ctx.append_log("debug_write_input", file=json.dumps(input, default=pydantic_encoder))
+    await ctx.append_log(
+        "debug_write_input", file=json.dumps(input, ensure_ascii=False, indent=2, default=pydantic_encoder)
+    )
     await ctx.append_log("debug_write_output", file=final_document_text)
     await ctx.append_log("debug_write_reason", file="\n----------\n".join(reasoning))
 

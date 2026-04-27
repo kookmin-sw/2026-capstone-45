@@ -1,9 +1,23 @@
 from io import IOBase
+from typing import Iterable
 from beartype import beartype
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from llm2doc.entity import Chat, ChatSource
 from llm2doc.entity.message import Message, MessageDepth
 from llm2doc.repository.file import create_file
+
+
+async def create_chat(db: AsyncSession, name: str, target_doc: int, source_docs: Iterable[int]):
+    sources: list[ChatSource] = []
+    for src_doc_id in source_docs:
+        sources.append(ChatSource(doc_id=src_doc_id))
+
+    chat = Chat(display_name=name, target_doc_id=target_doc, source_docs=sources)
+    db.add(chat)
+    await db.flush([chat])
+
+    return chat.chat_id
 
 
 @beartype

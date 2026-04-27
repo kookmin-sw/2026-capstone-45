@@ -39,7 +39,7 @@ class Message(Base):
 
     message_id: Mapped[int] = mapped_column(primary_key=True)
     chat_id: Mapped[int] = mapped_column(ForeignKey("chat.chat_id", onupdate="CASCADE"), nullable=False)
-    depth: Mapped[MessageDepth] = mapped_column(Integer, nullable=False)
+    depth: Mapped[MessageDepth] = mapped_column(nullable=False)
 
     content_text: Mapped[str] = mapped_column(Text, nullable=False)
     content_file_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("file.file_id", onupdate="CASCADE"))

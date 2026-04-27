@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncConnection
 
 from .artifact import Artifact
 from .chat import Chat
+from .chat_source import ChatSource
 from .config import Config
 from .document_image import DocumentImage
 from .document_log import DocumentLog
@@ -11,7 +12,7 @@ from .document import Document, DocumentStatus
 from .file import File
 
 
-DB_SCHEMA_VERSION = 4
+DB_SCHEMA_VERSION = 5
 
 
 async def create_schema(conn: AsyncConnection):
@@ -46,6 +47,7 @@ async def init_schema(db: AsyncEngine):
 __all__ = [
     "Artifact",
     "Chat",
+    "ChatSource",
     "Config",
     "DocumentImage",
     "DocumentLog",

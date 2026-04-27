@@ -1,11 +1,15 @@
 import asyncio
+
+from datetime import datetime
 from dotenv import load_dotenv
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from concurrent.futures import ThreadPoolExecutor
 
 from llm2doc.create_document import create_document
 from llm2doc.context.pipeline import PipelineContext
 from llm2doc.context.write import WriteContext
+from llm2doc.repository.chat import create_chat
+from llm2doc.save_chat import save_chat_messages
 from llm2doc.server import lifespan
 from llm2doc.util import validate_type
 
@@ -22,12 +26,12 @@ async def main():
     }
 
     async with lifespan(None) as context:
-        db = validate_type(context["db"], AsyncEngine)
+        engine = validate_type(context["db"], AsyncEngine)
         thread_pool = validate_type(context["thread_pool"], ThreadPoolExecutor)
 
         pipeline_ctx = PipelineContext(
             loop=asyncio.get_running_loop(),
-            engine=db,
+            engine=engine,
             thread_pool=thread_pool,
         )
 
@@ -48,16 +52,26 @@ async def main():
             source_docs = [mapping["news1"]]
             target_doc = mapping["financial2"]
         else:
-            return
+            raise ValueError(f"invalid {option=}")
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        async with AsyncSession(engine) as db:
+            async with db.begin():
+                chat_id = await create_chat(db, timestamp, target_doc, source_docs)
 
         ctx = WriteContext(
             pipeline_ctx=pipeline_ctx,
-            chat_id=-123,
+            chat_id=chat_id,
             target_doc_id=target_doc,
             source_doc_ids=source_docs,
         )
 
-        await create_document(ctx, query)
+        try:
+            await create_document(ctx, query)
+        finally:
+            async with AsyncSession(engine) as db:
+                await save_chat_messages(db, chat_id, f"debug_{timestamp}")
 
 
 if __name__ == "__main__":
