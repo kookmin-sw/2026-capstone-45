@@ -3,6 +3,7 @@ from sqlalchemy.exc import OperationalError, NoResultFound
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncConnection
 
 from .artifact import Artifact
+from .chat import Chat
 from .config import Config
 from .document_image import DocumentImage
 from .document_log import DocumentLog
@@ -10,7 +11,7 @@ from .document import Document, DocumentStatus
 from .file import File
 
 
-DB_SCHEMA_VERSION = 3
+DB_SCHEMA_VERSION = 4
 
 
 async def create_schema(conn: AsyncConnection):
@@ -42,4 +43,14 @@ async def init_schema(db: AsyncEngine):
             )
 
 
-__all__ = ["Artifact", "Config", "DocumentImage", "DocumentLog", "Document", "DocumentStatus", "File", "init_schema"]
+__all__ = [
+    "Artifact",
+    "Chat",
+    "Config",
+    "DocumentImage",
+    "DocumentLog",
+    "Document",
+    "DocumentStatus",
+    "File",
+    "init_schema",
+]

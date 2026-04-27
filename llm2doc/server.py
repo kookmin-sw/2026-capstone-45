@@ -13,7 +13,7 @@ from llm2doc.route.font import router as font
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI | None):
     db = create_async_engine("sqlite+aiosqlite:///db.sqlite3", echo=True)
     thread_pool = ThreadPoolExecutor(max_workers=1)
 

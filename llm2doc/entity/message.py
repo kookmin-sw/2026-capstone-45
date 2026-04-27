@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from llm2doc.entity.base import Base
 
 if TYPE_CHECKING:
+    from llm2doc.entity.chat import Chat
     from llm2doc.entity.file import File
 
 
@@ -42,4 +43,5 @@ class Message(Base):
 
     is_markdown: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
+    chat: Mapped["Chat"] = relationship("Chat", lazy="raise_on_sql", back_populates="messages")
     content_file: Mapped[Optional["File"]] = relationship("File", lazy="raise_on_sql")
