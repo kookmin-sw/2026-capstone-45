@@ -576,12 +576,19 @@ async def write_document(
                     found = True
                     break
 
-            if not found:
-                raise RuntimeError(f"unable to find tool for {tool_call}")
-
             fulfiled_tool_calls.add(tool_call.call_id)
-            result = await tool.invoke(tool_call.arguments, tool_call.call_id)
-            input.append(result)
+
+            if found:
+                result = await tool.invoke(tool_call.arguments, tool_call.call_id)
+                input.append(result)
+            else:
+                input.append(
+                    {
+                        "type": "function_call_output",
+                        "output": "Error: No such tool found.",
+                        "call_id": tool_call.call_id,
+                    }
+                )
 
             await ctx.append_message(
                 MessageDepth.TOOL_CALL,
