@@ -5,30 +5,26 @@
 텍스트 내용뿐 아니라 문서 구조적 역할까지 반영한 검색이 가능하다.
 """
 
-import html
 import json
 import os
 import re
+import asyncio
+import chromadb
+import chromadb.errors
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
-
-import chromadb
-import chromadb.errors
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
-from openai import OpenAI
+from openai import AsyncOpenAI
 from openai.types.responses.response_input_param import FunctionCallOutput
 
-from llm2doc.analyze_layout import LayoutAnalyzer, ParsedDocument
+from llm2doc.artifact.ocr import OCRArtifact
+from llm2doc.artifact.semantic import SemanticArtifact
 from llm2doc.bm25_search import BM25Document, BM25SearchClient, LocalBM25SearchClient
-from llm2doc.debug_trace import DecisionTracer
+from llm2doc.context.write import WriteContext
 
-
-PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-DATA_ROOT = PACKAGE_ROOT / "data"
-ARTIFACTS_ROOT = WORKSPACE_ROOT / "artifacts"
 
 COLLECTION_NAME = "docs_v2_semantic"
 COLLECTION_BATCH_SIZE = 20
@@ -130,7 +126,7 @@ class SearchRecord:
     """
 
     record_id: str
-    document: str
+    doc_id: int
     page: int
     display_block_id: str
     embedding_text: str
@@ -168,13 +164,6 @@ class RetrievalCandidate:
     @property
     def is_entity_only(self) -> bool:
         return self.channels == {"entity"}
-
-
-def _list_source_documents(data_root: Path = DATA_ROOT) -> list[str]:
-    """데이터 루트 아래의 문서 폴더 목록을 정렬해 반환한다."""
-    docs = [path.name for path in data_root.iterdir() if path.is_dir()]
-    docs.sort()
-    return docs
 
 
 def _load_json(path: Path) -> Any:
@@ -406,7 +395,7 @@ def _build_bm25_documents(records: Sequence[SearchRecord]) -> list[BM25Document]
         documents.append(
             BM25Document(
                 record_id=record.record_id,
-                document_id=record.document,
+                document_id=str(record.doc_id),
                 page_id=record.page + 1,
                 block_id=record.display_block_id,
                 text=lexical_text,
@@ -439,75 +428,8 @@ def _entity_attenuation(match_count: int, total_records: int) -> tuple[float, fl
     return 1.0, match_ratio, False
 
 
-def _sample_matches_doc(sample_id: str, doc: str) -> bool:
-    return sample_id == doc or sample_id.startswith(f"{doc}-")
-
-
-def _sample_to_doc_page_index(
-    sample_id: str,
-    doc: str,
-    page_count: int,
-    artifact_page_number: Any,
-) -> int | None:
-    if sample_id == doc:
-        if page_count == 1:
-            return 0
-        if isinstance(artifact_page_number, int) and 1 <= artifact_page_number <= page_count:
-            return artifact_page_number - 1
-        return None
-
-    prefix = f"{doc}-"
-    if sample_id.startswith(prefix):
-        suffix = sample_id[len(prefix):]
-        if suffix.isdigit():
-            page_index = int(suffix)
-            if 0 <= page_index < page_count:
-                return page_index
-            return None
-        if isinstance(artifact_page_number, int) and 1 <= artifact_page_number <= page_count:
-            return artifact_page_number - 1
-
-    return None
-
-
-def _relative_bbox(bbox: Sequence[int], width: int, height: int) -> list[int]:
-    return [
-        bbox[0] * 1000 // width,
-        bbox[1] * 1000 // height,
-        bbox[2] * 1000 // width,
-        bbox[3] * 1000 // height,
-    ]
-
-
-def _render_structured_html(
-    block_id: str,
-    bbox: Sequence[int],
-    width: int,
-    height: int,
-    text: str,
-    *,
-    is_html: bool,
-) -> str:
-    bbox_rel = _relative_bbox(bbox, width, height)
-    bbox_str = ", ".join(str(value) for value in bbox_rel)
-    result = [f'<div id="{block_id}" data-bbox="[{bbox_str}]">\n']
-
-    if is_html:
-        result.append("  ")
-        result.append(text)
-        result.append("\n")
-    else:
-        for line in REGEX_NEWLINE.split(text.strip()):
-            result.append("  <p>")
-            result.append(html.escape(line))
-            result.append("</p>\n")
-
-    result.append("</div>")
-    return "".join(result)
-
-
 def _build_embedding_text(
-    document: str,
+    doc_id: int,
     page_id: int,
     content: str,
     generic_role: str | None,
@@ -522,7 +444,7 @@ def _build_embedding_text(
     """
     return "\n".join(
         [
-            f"document_id: {document}",
+            f"doc_id: {doc_id}",
             f"page_id: {page_id}",
             f"generic_role: {generic_role or 'unknown'}",
             f"domain_role: {domain_role or 'unknown'}",
@@ -537,7 +459,7 @@ def _build_embedding_text(
 
 def _collection_metadata(record: SearchRecord) -> dict[str, Any]:
     return {
-        "document": record.document,
+        "doc_id": record.doc_id,
         "page": record.page,
         "display_block_id": record.display_block_id,
         "generic_role": record.generic_role or "unknown",
@@ -550,236 +472,93 @@ def _collection_metadata(record: SearchRecord) -> dict[str, Any]:
     }
 
 
-# semantic artifact가 존재하면 더 풍부한 블록 정보를 쓰고,
-# 없으면 OCR 원본 블록을 fallback으로 사용한다.
-def _load_semantic_artifact_pages(
-    doc: str,
-    page_count: int,
-    artifacts_root: Path = ARTIFACTS_ROOT,
-) -> dict[int, dict[str, Any]]:
-    matched_pages: dict[int, dict[str, Any]] = {}
+def _build_search_records(
+    src_docs: dict[int, OCRArtifact],
+    semantic_docs: dict[int, SemanticArtifact] | None = None,
+) -> dict[str, SearchRecord]:
+    records: dict[str, SearchRecord] = {}
 
-    if not artifacts_root.exists():
-        return matched_pages
+    for doc_id, ocr_artifact in src_docs.items():
+        sem_artifact = semantic_docs.get(doc_id) if semantic_docs else None
 
-    for artifact_root in sorted(artifacts_root.iterdir(), key=lambda path: path.name):
-        reference_dir = artifact_root / "01_reference"
-        canonical_pages_path = reference_dir / "canonical_pages.json"
-        semantic_overlay_path = reference_dir / "semantic_overlay.json"
+        for page_index, ocr_page in enumerate(ocr_artifact.pages):
+            sem_page = None
+            if sem_artifact and page_index < len(sem_artifact.canonical_pages):
+                sem_page = sem_artifact.canonical_pages[page_index]
 
-        if not canonical_pages_path.exists() or not semantic_overlay_path.exists():
-            continue
+            if sem_page:
+                for block_index, sem_block in enumerate(sem_page.blocks, start=1):
+                    text = sem_block.text or ""
+                    if not _should_index_text(text):
+                        continue
 
-        try:
-            canonical_pages = _load_json(canonical_pages_path)
-            semantic_overlay = _load_json(semantic_overlay_path)
-        except (OSError, json.JSONDecodeError):
-            continue
+                    display_block_id = f"page-{page_index + 1}-block-{block_index}"
+                    ocr_block = (
+                        ocr_page.blocks[block_index - 1]
+                        if block_index <= len(ocr_page.blocks)
+                        else None
+                    )
 
-        if not isinstance(canonical_pages, list) or not isinstance(semantic_overlay, list):
-            continue
+                    records[f"semantic:{doc_id}:{page_index + 1}:{block_index}"] = SearchRecord(
+                        record_id=f"semantic:{doc_id}:{page_index + 1}:{block_index}",
+                        doc_id=doc_id,
+                        page=page_index,
+                        display_block_id=display_block_id,
+                        embedding_text=_build_embedding_text(
+                            doc_id=doc_id,
+                            page_id=page_index + 1,
+                            content=text,
+                            generic_role=sem_block.generic_role,
+                            domain_role=sem_block.domain_role,
+                            generated_role_name=sem_block.generated_role_name,
+                            section_purpose=sem_block.section_purpose,
+                        ),
+                        display_html=(
+                            ocr_block.to_structured_html(ocr_page, block_id=display_block_id)
+                            if ocr_block
+                            else ""
+                        ),
+                        generic_role=sem_block.generic_role,
+                        domain_role=sem_block.domain_role,
+                        generated_role_name=sem_block.generated_role_name,
+                        section_purpose=sem_block.section_purpose,
+                        role_confidence=sem_block.role_confidence or 0.0,
+                        semantic_needs_review=sem_block.semantic_needs_review or False,
+                        source_kind="semantic",
+                    )
+            else:
+                for block_index, block in enumerate(ocr_page.blocks, start=1):
+                    text = block.content or ""
+                    if not _should_index_text(text):
+                        continue
 
-        overlay_by_block_id = {
-            _coerce_text(entry.get("block_id")): entry
-            for entry in semantic_overlay
-            if isinstance(entry, dict) and _coerce_text(entry.get("block_id"))
-        }
-
-        for canonical_page in canonical_pages:
-            if not isinstance(canonical_page, dict):
-                continue
-
-            sample_id = _coerce_text(canonical_page.get("sample_id")).strip()
-            if not _sample_matches_doc(sample_id, doc):
-                continue
-
-            page_index = _sample_to_doc_page_index(
-                sample_id,
-                doc,
-                page_count,
-                canonical_page.get("page"),
-            )
-            if page_index is None:
-                continue
-
-            blocks = canonical_page.get("blocks")
-            width = canonical_page.get("width")
-            height = canonical_page.get("height")
-            if not isinstance(blocks, list) or not isinstance(width, int) or not isinstance(height, int):
-                continue
-
-            candidate = {
-                "sample_id": sample_id,
-                "width": width,
-                "height": height,
-                "blocks": blocks,
-                "overlay_by_block_id": overlay_by_block_id,
-            }
-            current = matched_pages.get(page_index)
-            if current is None or len(blocks) > len(current["blocks"]):
-                matched_pages[page_index] = candidate
-
-    return matched_pages
-
-
-def _build_semantic_records_for_page(
-    doc: str,
-    page_index: int,
-    artifact_page: dict[str, Any],
-) -> list[SearchRecord]:
-    width = int(artifact_page["width"])
-    height = int(artifact_page["height"])
-    overlay_by_block_id = artifact_page["overlay_by_block_id"]
-    records: list[SearchRecord] = []
-
-    for ordinal, block in enumerate(artifact_page["blocks"], start=1):
-        if not isinstance(block, dict):
-            continue
-
-        text = _coerce_text(block.get("text"))
-        if not _should_index_text(text):
-            continue
-
-        bbox = _coerce_bbox(block.get("bbox_px"))
-        if bbox is None:
-            continue
-
-        display_block_id = _coerce_text(block.get("block_id")).strip() or f"{doc}-page-{page_index + 1}-block-{ordinal}"
-        overlay = overlay_by_block_id.get(display_block_id, {})
-
-        generic_role = _coerce_role(overlay.get("generic_role") if isinstance(overlay, dict) else None) or _coerce_role(block.get("generic_role"))
-        domain_role = _coerce_role(overlay.get("domain_role") if isinstance(overlay, dict) else None) or _coerce_role(block.get("domain_role"))
-        generated_role_name = _coerce_role(overlay.get("generated_role_name") if isinstance(overlay, dict) else None) or _coerce_role(block.get("generated_role_name"))
-        section_purpose = _coerce_role(overlay.get("section_purpose") if isinstance(overlay, dict) else None) or _coerce_role(block.get("section_purpose"))
-        role_confidence = _coerce_float(overlay.get("role_confidence") if isinstance(overlay, dict) else None)
-        if role_confidence == 0.0:
-            role_confidence = _coerce_float(block.get("role_confidence"))
-        semantic_needs_review = _coerce_bool(overlay.get("semantic_needs_review") if isinstance(overlay, dict) else None)
-        if not semantic_needs_review:
-            semantic_needs_review = _coerce_bool(block.get("semantic_needs_review"))
-
-        records.append(
-            SearchRecord(
-                record_id=f"semantic:{doc}:{display_block_id}",
-                document=doc,
-                page=page_index,
-                display_block_id=display_block_id,
-                embedding_text=_build_embedding_text(
-                    document=doc,
-                    page_id=page_index + 1,
-                    content=text,
-                    generic_role=generic_role,
-                    domain_role=domain_role,
-                    generated_role_name=generated_role_name,
-                    section_purpose=section_purpose,
-                ),
-                display_html=_render_structured_html(
-                    display_block_id,
-                    bbox,
-                    width,
-                    height,
-                    text,
-                    is_html=_looks_like_table_html(text),
-                ),
-                generic_role=generic_role,
-                domain_role=domain_role,
-                generated_role_name=generated_role_name,
-                section_purpose=section_purpose,
-                role_confidence=role_confidence,
-                semantic_needs_review=semantic_needs_review,
-                source_kind="semantic",
-            )
-        )
-
-    return records
-
-
-def _build_fallback_records_for_document(
-    doc: str,
-    parsed_doc: ParsedDocument,
-    covered_pages: set[int],
-) -> list[SearchRecord]:
-    records: list[SearchRecord] = []
-
-    for page_index, page in enumerate(parsed_doc.pages):
-        if page_index in covered_pages:
-            continue
-
-        for block_index, block in enumerate(page.blocks, start=1):
-            text = block.content or ""
-            if not _should_index_text(text):
-                continue
-
-            display_block_id = f"page-{page_index + 1}-block-{block_index}"
-            records.append(
-                SearchRecord(
-                    record_id=f"fallback:{doc}:{page_index + 1}:{block_index}",
-                    document=doc,
-                    page=page_index,
-                    display_block_id=display_block_id,
-                    embedding_text=_build_embedding_text(
-                        document=doc,
-                        page_id=page_index + 1,
-                        content=text,
+                    display_block_id = f"page-{page_index + 1}-block-{block_index}"
+                    records[f"fallback:{doc_id}:{page_index + 1}:{block_index}"] = SearchRecord(
+                        record_id=f"fallback:{doc_id}:{page_index + 1}:{block_index}",
+                        doc_id=doc_id,
+                        page=page_index,
+                        display_block_id=display_block_id,
+                        embedding_text=_build_embedding_text(
+                            doc_id=doc_id,
+                            page_id=page_index + 1,
+                            content=text,
+                            generic_role=None,
+                            domain_role=None,
+                            generated_role_name=None,
+                            section_purpose=None,
+                        ),
+                        display_html=block.to_structured_html(
+                            ocr_page,
+                            block_id=display_block_id,
+                        ),
                         generic_role=None,
                         domain_role=None,
                         generated_role_name=None,
                         section_purpose=None,
-                    ),
-                    display_html=_render_structured_html(
-                        display_block_id,
-                        block.bbox,
-                        page.width,
-                        page.height,
-                        text,
-                        is_html=block.is_html,
-                    ),
-                    generic_role=None,
-                    domain_role=None,
-                    generated_role_name=None,
-                    section_purpose=None,
-                    role_confidence=0.0,
-                    semantic_needs_review=False,
-                    source_kind="fallback",
-                )
-            )
-
-    return records
-
-
-def _build_search_records_for_parsed_doc(
-    doc: str,
-    parsed_doc: ParsedDocument,
-    artifacts_root: Path = ARTIFACTS_ROOT,
-) -> dict[str, SearchRecord]:
-    records: dict[str, SearchRecord] = {}
-    semantic_pages = _load_semantic_artifact_pages(doc, len(parsed_doc.pages), artifacts_root=artifacts_root)
-    covered_pages: set[int] = set()
-
-    for page_index, artifact_page in semantic_pages.items():
-        page_records = _build_semantic_records_for_page(doc, page_index, artifact_page)
-        if not page_records:
-            continue
-        covered_pages.add(page_index)
-        for record in page_records:
-            records[record.record_id] = record
-
-    for record in _build_fallback_records_for_document(doc, parsed_doc, covered_pages):
-        records[record.record_id] = record
-
-    return records
-
-
-def _build_search_records(
-    layout_analyzer: LayoutAnalyzer,
-    docs: Sequence[str],
-    artifacts_root: Path = ARTIFACTS_ROOT,
-) -> dict[str, SearchRecord]:
-    records: dict[str, SearchRecord] = {}
-
-    for doc in docs:
-        parsed_doc = layout_analyzer(doc)
-        records.update(_build_search_records_for_parsed_doc(doc, parsed_doc, artifacts_root=artifacts_root))
+                        role_confidence=0.0,
+                        semantic_needs_review=False,
+                        source_kind="fallback",
+                    )
 
     return records
 
@@ -829,12 +608,12 @@ def _dedupe_texts(values: Sequence[str], *, limit: int | None = None) -> list[st
 class ToolSearchSourceDocument:
     def __init__(
         self,
-        docs: list[str],
-        client: OpenAI | None,
-        tracer: DecisionTracer | None = None,
+        src_docs: Sequence[OCRArtifact],
+        client: AsyncOpenAI,
+        ctx: WriteContext,
         bm25_client: BM25SearchClient | None = None,
         *,
-        artifacts_root: Path = ARTIFACTS_ROOT,
+        semantic_artifacts: Sequence[SemanticArtifact | None] | None = None,
         force_rebuild: bool = False,
         records_override: dict[str, SearchRecord] | None = None,
         collection_override: Any = None,
@@ -842,15 +621,20 @@ class ToolSearchSourceDocument:
         """컬렉션을 로드하거나 생성하고, 현재 검색 대상 문서의 레코드를 준비한다."""
         super().__init__()
 
-        self.docs = docs
         self.client = client
         self.records_by_id: dict[str, SearchRecord] = {}
-        self.tracer = tracer or DecisionTracer(enabled=False)
+        self.ctx = ctx
         self.collection: Any = collection_override
         self.chroma: Any = None
         self._snapshot_counter = 0
         self.force_rebuild = force_rebuild
-        self.artifacts_root = artifacts_root
+        self.doc_ids = list(range(1, len(src_docs) + 1))
+        src_docs_dict = {i: doc for i, doc in enumerate(src_docs, start=1)}
+        semantic_docs_dict = (
+            {i: sem for i, sem in enumerate(semantic_artifacts, start=1) if sem is not None}
+            if semantic_artifacts
+            else {}
+        )
 
         self.description = {
             "type": "function",
@@ -882,9 +666,6 @@ class ToolSearchSourceDocument:
                 model_name=os.environ["OPENAI_EMBED_MODEL"],
             )
 
-            layout_analyzer = LayoutAnalyzer()
-            all_docs = _list_source_documents(DATA_ROOT)
-
             self.chroma = chromadb.RustClient(path="debug_chromadb_cache")
             try:
                 if self.force_rebuild and self.collection is None:
@@ -898,11 +679,7 @@ class ToolSearchSourceDocument:
                         name=COLLECTION_NAME,
                         embedding_function=embedding_function,
                     )
-                    self.records_by_id = _build_search_records(
-                        layout_analyzer,
-                        self.docs,
-                        artifacts_root=self.artifacts_root,
-                    )
+                    self.records_by_id = _build_search_records(src_docs_dict, semantic_docs_dict)
                 else:
                     raise chromadb.errors.NotFoundError("Collection rebuild requested.")
             except chromadb.errors.NotFoundError:
@@ -910,56 +687,28 @@ class ToolSearchSourceDocument:
                     name=COLLECTION_NAME,
                     embedding_function=embedding_function,
                 )
-                all_records = _build_search_records(
-                    layout_analyzer,
-                    all_docs,
-                    artifacts_root=self.artifacts_root,
-                )
+                all_records = _build_search_records(src_docs_dict, semantic_docs_dict)
                 _populate_collection(self.collection, all_records.values())
-                self.records_by_id = {
-                    record_id: record
-                    for record_id, record in all_records.items()
-                    if record.document in self.docs
-                }
-            finally:
-                layout_analyzer.dispose()
-                del layout_analyzer
+                self.records_by_id = all_records
 
         self.bm25_client = bm25_client or LocalBM25SearchClient(
             _build_bm25_documents(list(self.records_by_id.values()))
         )
 
-    def invoke(self, param: str, call_id: str) -> FunctionCallOutput:
+    async def invoke(self, param: str, call_id: str) -> FunctionCallOutput:
         """OpenAI function-call 인터페이스를 일반 검색 함수로 연결한다."""
         param_parsed = json.loads(param)
         query: str = param_parsed["query"]
 
-        output = self.invoke_raw(query)
+        output = await self.invoke_raw(query)
         return {"type": "function_call_output", "output": output, "call_id": call_id}
 
     def _trace_event(self, event: str, payload: dict[str, Any]) -> None:
-        self.tracer.event("search.first_stage", event, payload)
-        if not self.tracer.enabled:
-            return
-        self.tracer.append_jsonl(
-            "search/first_stage.jsonl",
-            {
-                "ts": datetime.now(timezone.utc).isoformat(),
-                "run_id": self.tracer.run_id,
-                "component": "search.first_stage",
-                "event": event,
-                "payload": payload,
-            },
-        )
+        self.ctx.append_trace_sync({"type": event, "component": "search.first_stage", **payload})
 
     def _save_snapshot(self, kind: str, payload: Any) -> None:
-        if not self.tracer.enabled:
-            return
         self._snapshot_counter += 1
-        self.tracer.save_json(
-            f"search/first_stage_response_{self._snapshot_counter:03d}.json",
-            {"kind": kind, "payload": payload},
-        )
+        self.ctx.append_log_sync(kind, file=json.dumps(payload, ensure_ascii=False, indent=2))
 
     def _build_query_profile(self, query: str) -> QueryProfile:
         normalized_query = _normalize_query_text(query)
@@ -989,7 +738,7 @@ class ToolSearchSourceDocument:
         )
         return profile
 
-    def _request_query_expansion(self, profile: QueryProfile) -> dict[str, list[str]]:
+    async def _request_query_expansion(self, profile: QueryProfile) -> dict[str, list[str]]:
         if self.client is None:
             self._trace_event(
                 "llm_expansion_failed",
@@ -999,18 +748,18 @@ class ToolSearchSourceDocument:
 
         prompt = PROMPT_QUERY_EXPANSION.format(
             query=profile.raw_query,
-            source_documents=", ".join(self.docs),
+            source_documents=", ".join([str(x) for x in self.doc_ids]),
         )
         self._trace_event(
             "llm_expansion_requested",
-            {"query": profile.raw_query, "source_documents": self.docs},
+            {"query": profile.raw_query, "source_documents": self.doc_ids},
         )
         model_name = (
             os.environ.get("OPENAI_QUERY_EXPANSION_MODEL")
             or os.environ.get("OPENAI_MODEL")
             or "gpt-4.1-mini"
         )
-        response = self.client.responses.create(
+        response = await self.client.responses.create(
             model=model_name,
             input=[
                 {
@@ -1068,10 +817,10 @@ class ToolSearchSourceDocument:
         )
 
     def _where_condition(self) -> Any:
-        if len(self.docs) > 1:
-            return {"$or": [{"document": doc} for doc in self.docs]}
-        if len(self.docs) == 1:
-            return {"document": self.docs[0]}
+        if len(self.doc_ids) > 1:
+            return {"$or": [{"doc_id": doc_id} for doc_id in self.doc_ids]}
+        if len(self.doc_ids) == 1:
+            return {"doc_id": self.doc_ids[0]}
         raise ValueError("document list is empty")
 
     def _collect_semantic_candidates(self, profile: QueryProfile) -> dict[str, RetrievalCandidate]:
@@ -1114,7 +863,7 @@ class ToolSearchSourceDocument:
                     hits_for_query.append(
                         {
                             "record_id": record.record_id,
-                            "document_id": record.document,
+                            "doc_id": record.doc_id,
                             "page_id": record.page + 1,
                             "block_id": record.display_block_id,
                             "distance": distance_value,
@@ -1133,15 +882,16 @@ class ToolSearchSourceDocument:
         )
         return candidates
 
-    def _collect_bm25_candidates(self, profile: QueryProfile) -> dict[str, RetrievalCandidate]:
+    async def _collect_bm25_candidates(self, profile: QueryProfile) -> dict[str, RetrievalCandidate]:
         candidates: dict[str, RetrievalCandidate] = {}
         query_payloads: list[dict[str, Any]] = []
 
         for lexical_query in profile.lexical_queries:
             try:
-                hits = self.bm25_client.search(
+                hits = await asyncio.to_thread(
+                    self.bm25_client.search,
                     query=lexical_query,
-                    docs=self.docs,
+                    docs=[str(x) for x in self.doc_ids],
                     top_k=BM25_QUERY_TOP_K,
                 )
                 self._save_snapshot(
@@ -1153,7 +903,7 @@ class ToolSearchSourceDocument:
                                 "record_id": hit.record_id,
                                 "score": hit.score,
                                 "matched_terms": hit.matched_terms,
-                                "document_id": hit.document_id,
+                                "doc_id": int(hit.document_id),
                                 "page_id": hit.page_id,
                                 "block_id": hit.block_id,
                             }
@@ -1182,7 +932,7 @@ class ToolSearchSourceDocument:
                             "record_id": hit.record_id,
                             "score": hit.score,
                             "matched_terms": hit.matched_terms,
-                            "document_id": hit.document_id,
+                            "doc_id": record.doc_id,
                             "page_id": hit.page_id,
                             "block_id": hit.block_id,
                         }
@@ -1200,24 +950,31 @@ class ToolSearchSourceDocument:
         )
         return candidates
 
-    def _collect_entity_candidates(self, profile: QueryProfile) -> dict[str, RetrievalCandidate]:
+    async def _collect_entity_candidates(self, profile: QueryProfile) -> dict[str, RetrievalCandidate]:
         hits_by_record: dict[str, RetrievalCandidate] = {}
         grounded_entities: list[str] = []
         trace_entities: list[dict[str, Any]] = []
         total_records = len(self.records_by_id)
 
-        for entity in profile.entity_candidates:
-            normalized = entity.lower()
-            matched_record_ids: list[str] = []
-            for record in self.records_by_id.values():
-                if normalized not in record.embedding_text.lower():
-                    continue
-                matched_record_ids.append(record.record_id)
+        def do_iteration():
+            local_hits: list[tuple[str, list[str], float, float, bool]] = []
+            for entity in profile.entity_candidates:
+                normalized = entity.lower()
+                matched_record_ids: list[str] = []
+                for record in self.records_by_id.values():
+                    if normalized not in record.embedding_text.lower():
+                        continue
+                    matched_record_ids.append(record.record_id)
 
-            attenuation_factor, match_ratio, is_common_entity = _entity_attenuation(
-                len(matched_record_ids), total_records
-            )
+                attenuation_factor, match_ratio, is_common_entity = _entity_attenuation(
+                    len(matched_record_ids), total_records
+                )
+                local_hits.append((entity, matched_record_ids, attenuation_factor, match_ratio, is_common_entity))
+            return local_hits
 
+        results = await asyncio.to_thread(do_iteration)
+
+        for entity, matched_record_ids, attenuation_factor, match_ratio, is_common_entity in results:
             if matched_record_ids and attenuation_factor > 0.0:
                 entity_signal = min(1.0, attenuation_factor)
                 for record_id in matched_record_ids:
@@ -1298,7 +1055,7 @@ class ToolSearchSourceDocument:
                 "candidates": [
                     {
                         "record_id": candidate.record.record_id,
-                        "document_id": candidate.record.document,
+                        "doc_id": candidate.record.doc_id,
                         "page_id": candidate.record.page + 1,
                         "block_id": candidate.record.display_block_id,
                         "channels": sorted(candidate.channels),
@@ -1341,7 +1098,7 @@ class ToolSearchSourceDocument:
                 -candidate.first_stage_score,
                 candidate.semantic_distance if candidate.semantic_distance is not None else 999.0,
                 -(candidate.bm25_score or 0.0),
-                candidate.record.document,
+                candidate.record.doc_id,
                 candidate.record.page,
                 candidate.record.display_block_id,
             )
@@ -1349,7 +1106,7 @@ class ToolSearchSourceDocument:
         entity_only_candidates.sort(
             key=lambda candidate: (
                 -candidate.first_stage_score,
-                candidate.record.document,
+                candidate.record.doc_id,
                 candidate.record.page,
                 candidate.record.display_block_id,
             )
@@ -1391,11 +1148,11 @@ class ToolSearchSourceDocument:
         for index, candidate in enumerate(candidates[:TOOL_DISPLAY_LIMIT], start=1):
             record = candidate.record
             output.append(
-                "Candidate #{idx}: record_id={record_id}, document_id={document_id}, page_id={page_id}, "
+                "Candidate #{idx}: record_id={record_id}, doc_id={doc_id}, page_id={page_id}, "
                 "block_id={block_id}, channels={channels}, first_stage_score={score:.4f}".format(
                     idx=index,
                     record_id=record.record_id,
-                    document_id=record.document,
+                    doc_id=record.doc_id,
                     page_id=record.page + 1,
                     block_id=record.display_block_id,
                     channels=",".join(sorted(candidate.channels)),
@@ -1426,20 +1183,20 @@ class ToolSearchSourceDocument:
 
         return "\n".join(output)
 
-    def invoke_raw(self, query: str) -> str:
+    async def invoke_raw(self, query: str) -> str:
         """질의를 실행하고 1차 후보 10~12개를 반환한다."""
-        if not self.docs:
+        if not self.doc_ids:
             raise ValueError("document list is empty")
 
         print(f"[search_source_document] {query}")
 
         profile = self._build_query_profile(query)
-        expansion_payload = self._request_query_expansion(profile)
+        expansion_payload = await self._request_query_expansion(profile)
         profile = self._apply_query_expansion(profile, expansion_payload)
 
         semantic_candidates = self._collect_semantic_candidates(profile)
-        bm25_candidates = self._collect_bm25_candidates(profile)
-        entity_candidates = self._collect_entity_candidates(profile)
+        bm25_candidates = await self._collect_bm25_candidates(profile)
+        entity_candidates = await self._collect_entity_candidates(profile)
         merged_candidates = self._merge_candidates(
             semantic_candidates,
             bm25_candidates,
@@ -1458,15 +1215,3 @@ class ToolSearchSourceDocument:
             },
         )
         return self._format_search_output(ordered_candidates)
-
-
-def main():
-    from dotenv import load_dotenv
-    load_dotenv()
-    
-    tool = ToolSearchSourceDocument(["financial2"], client=None)
-    print(tool.invoke_raw("What is KMX?"))
-
-
-if __name__ == "__main__":
-    main()

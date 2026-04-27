@@ -1,4 +1,5 @@
 import json
+import asyncio
 from typing import Sequence
 from openai.types.responses.response_input_param import FunctionCallOutput
 
@@ -31,12 +32,12 @@ class ToolAskUserQuestion:
             },
         }
 
-    def invoke(self, param: str, call_id: str) -> FunctionCallOutput:
+    async def invoke(self, param: str, call_id: str) -> FunctionCallOutput:
         param_parsed = json.loads(param)
         question: str = param_parsed["question"]
         choices: Sequence[str] = param_parsed["choices"]
 
-        answer = self.ask(question, choices).strip()
+        answer = (await self.ask(question, choices)).strip()
 
         if len(answer) == 0:
             return {
@@ -51,7 +52,7 @@ class ToolAskUserQuestion:
             "call_id": call_id,
         }
 
-    def ask(self, question: str, choices: Sequence[str]):
+    async def ask(self, question: str, choices: Sequence[str]):
         print()
         print(question)
         for i, x in enumerate(choices):
@@ -61,12 +62,13 @@ class ToolAskUserQuestion:
 
         while True:
             try:
-                choice = int(input("답변 번호: "), base=10)
+                choice_str = await asyncio.to_thread(input, "답변 번호: ")
+                choice = int(choice_str, base=10)
             except ValueError:
                 continue
 
             if choice == len(choices) + 1:
-                return input("답변: ")
+                return await asyncio.to_thread(input, "답변: ")
 
             try:
                 return choices[choice - 1]

@@ -6,6 +6,8 @@ output/
 /*.json
 /*.jpg
 /*.png
+/db.sqlite3
+/file
 
 tessdata
 

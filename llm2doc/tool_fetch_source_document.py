@@ -5,21 +5,19 @@
 """
 
 import json
+
 from typing import Sequence
 from openai.types.responses.response_input_param import FunctionCallOutput
 
-from llm2doc.analyze_layout import ParsedDocument
+from llm2doc.artifact.ocr import OCRArtifact
 
 
 class ToolFetchSourceDocument:
-    def __init__(self, docs: Sequence[ParsedDocument]):
+    def __init__(self, docs: Sequence[OCRArtifact]):
         """미리 파싱해 둔 문서를 문서 ID 기준으로 조회 가능하게 준비한다."""
         super().__init__()
 
-        self.docs: dict[str, ParsedDocument] = dict()
-
-        for doc in docs:
-            self.docs[doc.id] = doc
+        self.docs = docs
 
         self.description = {
             "type": "function",
@@ -30,8 +28,8 @@ class ToolFetchSourceDocument:
                 "type": "object",
                 "properties": {
                     "document_id": {
-                        "type": "string",
-                        "description": "The id of the document.",
+                        "type": "number",
+                        "description": "The id of the document. Starts from 1.",
                     },
                     "page_id": {
                         "type": "number",
@@ -43,14 +41,14 @@ class ToolFetchSourceDocument:
             },
         }
 
-    def invoke(self, param: str, call_id: str) -> FunctionCallOutput:
+    async def invoke(self, param: str, call_id: str) -> FunctionCallOutput:
         """LLM 함수 호출 포맷을 받아 페이지 HTML을 반환한다.
 
         입력 검증을 이 함수에서 모두 처리하므로, 잘못된 문서 ID나 페이지 번호가
         들어오더라도 예외를 터뜨리기보다 읽기 쉬운 오류 문자열을 돌려준다.
         """
         param_parsed = json.loads(param)
-        document_id: str = param_parsed["document_id"]
+        doc_idx = int(param_parsed["document_id"]) - 1
         try:
             page_id = int(param_parsed["page_id"])
         except (TypeError, ValueError):
@@ -60,14 +58,14 @@ class ToolFetchSourceDocument:
                 "call_id": call_id,
             }
 
-        if document_id not in self.docs:
+        if doc_idx < 0 or len(self.docs) <= doc_idx:
             return {
                 "type": "function_call_output",
-                "output": f"Error: {document_id} is not a valid document ID.",
+                "output": f"Error: {param_parsed['document_id']} is not a valid document ID.",
                 "call_id": call_id,
             }
 
-        doc = self.docs[document_id]
+        doc = self.docs[doc_idx]
 
         if page_id < 1 or len(doc.pages) < page_id:
             return {
@@ -81,6 +79,6 @@ class ToolFetchSourceDocument:
 
         return {
             "type": "function_call_output",
-            "output": f"Contents of document_id={document_id}, page_id={page_id}:\n{page_html}\n",
+            "output": f"Contents of document_id={param_parsed['document_id']}, page_id={page_id}:\n{page_html}\n",
             "call_id": call_id,
         }
