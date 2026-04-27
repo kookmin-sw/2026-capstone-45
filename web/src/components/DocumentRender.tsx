@@ -105,7 +105,7 @@ function DocumentRender() {
 				</button>
 				<span>&nbsp;{zoom / 1000}x</span>
 			</div>
-			<div style={{ backgroundColor: "#ddd", padding: "1px" }}>
+			<div className="printable" style={{ backgroundColor: "#ddd", padding: "1px" }}>
 				{renderedPages}
 			</div>
 		</>

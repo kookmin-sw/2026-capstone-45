@@ -42,3 +42,29 @@ select {
 	font-family: inherit;
 	font-size: inherit;
 }
+
+@media print {
+	body * {
+		visibility: hidden;
+	}
+	.printable,
+	.printable * {
+		visibility: visible;
+	}
+	.printable {
+		position: absolute;
+		left: 0;
+		top: 0;
+		background-color: transparent !important;
+		padding: 0 !important;
+	}
+
+	.printable > div {
+		margin: 0 !important;
+		box-shadow: none !important;
+		page-break-after: always;
+		break-inside: avoid;
+		-webkit-print-color-adjust: exact;
+		print-color-adjust: exact;
+	}
+}
