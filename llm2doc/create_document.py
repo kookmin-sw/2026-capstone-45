@@ -748,4 +748,6 @@ async def create_document(
         return render_document(rendered_pages)
 
     rendered_doc = await asyncio.to_thread(finalize_render)
-    await save_rendered_document(db, ctx.chat_id, rendered_doc.model_dump_json())
+
+    async with ctx.pipeline_ctx.with_db() as db:
+        await save_rendered_document(db, ctx.chat_id, rendered_doc.model_dump_json())
