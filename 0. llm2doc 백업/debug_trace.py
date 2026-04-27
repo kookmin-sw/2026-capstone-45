@@ -16,6 +16,10 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def trace_time_display() -> str:
+    return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
+
+
 def _generate_run_id() -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     return f"{timestamp}-{uuid.uuid4().hex[:8]}"
@@ -73,6 +77,7 @@ class DecisionTracer:
         self.append_jsonl(
             "events.jsonl",
             {
+                "time": trace_time_display(),
                 "ts": _utc_now_iso(),
                 "run_id": self.run_id,
                 "component": component,

@@ -16,18 +16,17 @@ from PIL import Image
 from openai import OpenAI
 from beartype import beartype
 from bs4 import BeautifulSoup
-from typing import Sequence, List, Any, cast
+from typing import Sequence, Any, cast
 from openai.types.responses.response_input_param import ResponseInputParam
 
-from .analyze_layout import LayoutAnalyzer, ParsedDocument
-from .debug_trace import DecisionTracer, resolve_debug_trace
-from .render_image import render_boxes, erase_bounding_box
-from .util import image_as_data_uri
-from .tool_fetch_source_document import ToolFetchSourceDocument
-from .tool_search_source_document import ToolSearchSourceDocument
+from llm2doc.analyze_layout import LayoutAnalyzer, ParsedDocument
+from llm2doc.debug_trace import DecisionTracer, resolve_debug_trace
+from llm2doc.render_image import render_boxes, erase_bounding_box
+from llm2doc.tool_fetch_source_document import ToolFetchSourceDocument
+from llm2doc.tool_search_source_document import ToolSearchSourceDocument
 
 RESULT_OUTPUT_ROOT = r"C:\Users\echin\Desktop\ALLLM\llm-to-document\output"
-RESULT_OUTPUT_DIR_NAME: str | None = "integrate2_news1_financial2_test"
+RESULT_OUTPUT_DIR_NAME: str | None = "integrate3_financial3_financial2"
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 WORKSPACE_ROOT = PROJECT_ROOT.parent
@@ -203,9 +202,8 @@ def ensure_semantic_artifacts(
     artifacts_root: Path,
     tracer: DecisionTracer | None = None,
 ) -> bool:
-    from .semantic_pipeline.reference_pipeline import parse_reference
-    from .semantic_pipeline.semantic_types import SemanticConfig
-
+    from llm2doc.semantic_pipeline.pipeline.reference_pipeline import parse_reference
+    from llm2doc.semantic_pipeline.semantic.semantic_types import SemanticConfig
     created_any = False
 
     for doc_id in doc_ids:
@@ -249,7 +247,7 @@ def ensure_semantic_visualizations(
     artifacts_root: Path,
     tracer: DecisionTracer | None = None,
 ) -> list[Path]:
-    from .semantic_pipeline.visualize import render_reference_visualization
+    from llm2doc.semantic_pipeline.visualization.visualize import render_reference_visualization
 
     visualization_paths: list[Path] = []
 
@@ -948,7 +946,7 @@ if __name__ == "__main__":
     load_dotenv()
 
     # 옵션 0, 1, 2 중 원하시는 기능을 선택해서 실행하세요.
-    option = 1
+    option = 3
 
     if option == 0:
         create_document(None, ["financial2"], "financial1")
@@ -965,7 +963,7 @@ if __name__ == "__main__":
     elif option == 3:
         create_document(
             "삼성전자 관련 브리핑을 작성해줘 (시장 전체 말고 삼성전자만)",
-            ["financial1", "financial3"],
+            ["financial3"],
             "financial2", debug_trace=True
         )
     elif option == 4:

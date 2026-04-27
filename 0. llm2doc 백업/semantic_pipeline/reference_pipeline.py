@@ -1,3 +1,2 @@
-from .pipeline.reference_pipeline import build_reference_template, parse_reference
+from .pipeline.reference_pipeline import *
 
-__all__ = ["build_reference_template", "parse_reference"]

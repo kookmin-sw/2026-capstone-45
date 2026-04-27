@@ -1,9 +1,19 @@
 from dataclasses import asdict, replace
 from typing import Optional, Tuple
 
-from .semantic_backends.qwen_api import QwenAPIBackend
-from .semantic_schema import enrich_generated_role, normalize_decision, parse_role_decision, validate_role_pair
-from .semantic_types import BlockContextPayload, RoleDecision, RoleTraceEntry, SemanticConfig
+from llm2doc.semantic_pipeline.semantic.semantic_backends.qwen_api import QwenAPIBackend
+from llm2doc.semantic_pipeline.semantic.semantic_schema import (
+    enrich_generated_role,
+    normalize_decision,
+    parse_role_decision,
+    validate_role_pair,
+)
+from llm2doc.semantic_pipeline.semantic.semantic_types import (
+    BlockContextPayload,
+    RoleDecision,
+    RoleTraceEntry,
+    SemanticConfig,
+)
 
 
 def _truncate_response(raw_response: Optional[str]) -> Optional[str]:

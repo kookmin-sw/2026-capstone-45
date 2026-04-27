@@ -5,12 +5,12 @@ from typing import Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
-from .semantic_backends.qwen_api import QwenAPIBackend
-from .semantic_context import build_block_context
-from .semantic_engine import resolve_block_decision
-from .semantic_schema import enrich_generated_role
-from .semantic_types import RoleDecision, SemanticConfig, SemanticRunSummary
-from ..common.types import CanonicalBlock, CanonicalPage, PageAnalysis
+from llm2doc.semantic_pipeline.semantic.semantic_backends.qwen_api import QwenAPIBackend
+from llm2doc.semantic_pipeline.semantic.semantic_context import build_block_context
+from llm2doc.semantic_pipeline.semantic.semantic_engine import resolve_block_decision
+from llm2doc.semantic_pipeline.semantic.semantic_schema import enrich_generated_role
+from llm2doc.semantic_pipeline.semantic.semantic_types import RoleDecision, SemanticConfig, SemanticRunSummary
+from llm2doc.semantic_pipeline.common.types import CanonicalBlock, CanonicalPage, PageAnalysis
 
 
 def _reset_semantic_fields(block: CanonicalBlock) -> None:

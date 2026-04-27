@@ -2,8 +2,6 @@ import json
 from typing import Sequence
 from openai.types.responses.response_input_param import FunctionCallOutput
 
-from .analyze_layout import ParsedDocument
-
 
 class ToolAskUserQuestion:
     def __init__(self):
