@@ -15,8 +15,9 @@ $ cd llm2doc
 
 2. 의존성 설치 (uv 사용):
 ```bash
-llm2doc/ $ uv sync
+llm2doc/ $ uv sync --extra cpu
 ```
+혹은 NVidia GPU가 있는 경우 `--extra cuda`를 명시해도 됨.
 
 3. 웹 인터페이스 의존성 설치
 ```bash
