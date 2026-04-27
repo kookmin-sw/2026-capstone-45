@@ -73,6 +73,8 @@ async def main():
             async with AsyncSession(engine) as db:
                 await save_chat_messages(db, chat_id, f"debug_{timestamp}")
 
+        print(f"Finished generating chat_id={chat_id}!")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
