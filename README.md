@@ -22,7 +22,7 @@ llm2doc/ $ uv sync --extra cpu
 3. 웹 인터페이스 의존성 설치
 ```bash
 llm2doc/ $ cd web
-llm2doc/web/ $ pnpm install --dev
+llm2doc/web/ $ pnpm install
 ```
 
 # 실행방법
