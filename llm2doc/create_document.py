@@ -18,7 +18,6 @@ from llm2doc.artifact.semantic import SemanticArtifact, SemanticArtifactPipeline
 from llm2doc.artifact.run import build_artifact, get_or_build_artifact
 from llm2doc.context.write import WriteContext
 from llm2doc.render_image import render_document, render_page, RenderedPage
-from llm2doc.dummy_tracer import DummyTracer
 from llm2doc.tool_fetch_source_document import ToolFetchSourceDocument
 from llm2doc.tool_search_source_document import ToolSearchSourceDocument
 from llm2doc.repository.artifact import load_artifact
@@ -384,14 +383,15 @@ async def maybe_generate_analysis(
     client: AsyncOpenAI,
     input_items: ResponseInputParam,
     query: str,
-    tracer: DummyTracer,
     *,
     component: str,
 ) -> dict[str, Any] | None:
-    tracer.event(
-        component,
-        "analysis_requested",
-        {"source_documents": ctx.source_doc_ids},
+    await ctx.append_trace(
+        {
+            "type": "analysis_requested",
+            "component": component,
+            "source_documents": ctx.source_doc_ids,
+        }
     )
     analysis_prompt = PROMPT_ANALYZE_TRACE.format(source_documents=", ".join([str(x) for x in ctx.source_doc_ids]))
     response = await client.responses.create(
@@ -408,21 +408,21 @@ async def maybe_generate_analysis(
 
     # TODO
     return
-    tracer.save_json("llm/analysis_response.json", response_to_jsonable(response))
+    await ctx.append_log("llm/analysis_response.json", file=json.dumps(response_to_jsonable(response), ensure_ascii=False, indent=2))
 
     analysis = normalize_analysis_payload(
         extract_json_object(extract_response_text(response)),
         query=query,
         source_doc_ids=source_doc_ids,
     )
-    tracer.save_json("analysis.json", analysis)
-    tracer.event(
-        component,
-        "analysis_saved",
+    await ctx.append_log("analysis.json", file=json.dumps(analysis, ensure_ascii=False, indent=2))
+    await ctx.append_trace(
         {
+            "type": "analysis_saved",
+            "component": component,
             "source_document_count": len(analysis["source_documents"]),
             "evidence_count": len(analysis["evidence"]),
-        },
+        }
     )
     return analysis
 
@@ -431,7 +431,6 @@ async def request_final_document(
     ctx: WriteContext,
     client: AsyncOpenAI,
     input_items: ResponseInputParam,
-    tracer: DummyTracer,
     *,
     component: str,
 ) -> str:
@@ -440,7 +439,7 @@ async def request_final_document(
     last_output_text = ""
 
     for attempt in range(1, 6):
-        tracer.event(component, "final_document_requested", {"attempt": attempt})
+        await ctx.append_trace({"type": "final_document_requested", "component": component, "attempt": attempt})
         final_input.append(
             {
                 "role": "user",
@@ -451,7 +450,7 @@ async def request_final_document(
             model=os.environ["OPENAI_MODEL"],
             input=final_input,
         )
-        tracer.save_json("llm/final_document_response.json", response_to_jsonable(response))
+        await ctx.append_log("llm/final_document_response.json", file=json.dumps(response_to_jsonable(response), ensure_ascii=False, indent=2))
 
         output_text = extract_response_text(response)
         last_output_text = output_text
@@ -459,17 +458,23 @@ async def request_final_document(
 
         extracted_document = extract_document_block(output_text)
         if extracted_document is not None:
-            tracer.event(
-                component,
-                "final_document_saved",
-                {"attempt": attempt, "chars": len(extracted_document)},
+            await ctx.append_trace(
+                {
+                    "type": "final_document_saved",
+                    "component": component,
+                    "attempt": attempt,
+                    "chars": len(extracted_document),
+                }
             )
             return extracted_document
 
-        tracer.event(
-            component,
-            "final_document_invalid",
-            {"attempt": attempt, "preview": output_text[:500]},
+        await ctx.append_trace(
+            {
+                "type": "final_document_invalid",
+                "component": component,
+                "attempt": attempt,
+                "preview": output_text[:500],
+            }
         )
         final_input += response.output
         prompt_text = PROMPT_FINAL_DOCUMENT_RETRY
@@ -485,7 +490,6 @@ async def write_document(
     query: str,
     src_docs: Sequence[OCRArtifact],
     target_doc: OCRArtifact,
-    tracer: DummyTracer,
     *,
     semantic_artifacts: Sequence[SemanticArtifact | None] | None = None,
     component: str,
@@ -504,7 +508,7 @@ async def write_document(
         ToolSearchSourceDocument(
             src_docs,
             client=client,
-            tracer=tracer,
+            ctx=ctx,
             semantic_artifacts=semantic_artifacts,
         ),
     ]
@@ -553,14 +557,14 @@ async def write_document(
 
         # 모델이 요청한 도구를 실제 파이썬 객체에 매핑해 실행한다.
         for tool_call in tool_calls:
-            tracer.event(
-                component,
-                "tool_requested",
+            await ctx.append_trace(
                 {
+                    "type": "tool_requested",
+                    "component": component,
                     "tool": tool_call.name,
                     "call_id": tool_call.call_id,
                     "arguments": tool_call.arguments,
-                },
+                }
             )
             found = False
             for tool in tools:
@@ -574,14 +578,14 @@ async def write_document(
             fulfiled_tool_calls.add(tool_call.call_id)
             result = await tool.invoke(tool_call.arguments, tool_call.call_id)
             input.append(result)
-            tracer.event(
-                component,
-                "tool_result",
+            await ctx.append_trace(
                 {
+                    "type": "tool_result",
+                    "component": component,
                     "tool": tool_call.name,
                     "call_id": tool_call.call_id,
                     "output_preview": str(result.get("output", ""))[:500],
-                },
+                }
             )
 
     await maybe_generate_analysis(
@@ -589,14 +593,12 @@ async def write_document(
         client,
         input,
         query,
-        tracer,
         component=component,
     )
     final_document_text = await request_final_document(
         ctx,
         client,
         input,
-        tracer,
         component=component,
     )
 
@@ -623,16 +625,12 @@ async def create_document(
     # os.makedirs(output_dir, exist_ok=True)
     # semantic_artifacts_root = Path(output_dir) / SEMANTIC_ARTIFACTS_DIRNAME
 
-    tracer = DummyTracer.create()
-    tracer.event(
-        "create_document",
-        "run_started",
+    await ctx.append_trace(
         {
+            "type": "run_started",
+            "component": "create_document",
             "query": query,
-            # "src_docs": src_docs,
-            # "target_doc": target_doc,
-            # "output_dir": output_dir,
-        },
+        }
     )
 
     # 문서 불러와서 파싱
@@ -642,7 +640,6 @@ async def create_document(
     # semantic_visualization_paths = ensure_semantic_visualizations(
     #     src_docs,
     #     semantic_artifacts_root,
-    #     tracer,
     # )
 
     await build_artifact(ctx.pipeline_ctx.engine, [ctx.target_doc_id, *ctx.source_doc_ids])
@@ -680,7 +677,6 @@ async def create_document(
         query,
         src_docs_parsed,
         target_doc_parsed,
-        tracer,
         semantic_artifacts=src_sem_artifacts,
         component="create_document",
     )
@@ -713,10 +709,12 @@ async def create_document(
 
             htmls[block_page][block_idx] = block.decode_contents()
 
-    tracer.event(
-        "create_document",
-        "render_started",
-        {"page_count": len(target_doc_images)},
+    await ctx.append_trace(
+        {
+            "type": "render_started",
+            "component": "create_document",
+            "page_count": len(target_doc_images),
+        }
     )
 
     rendered_pages: list[RenderedPage] = []
@@ -731,14 +729,8 @@ async def create_document(
     with open("debug_final.json", "wt", encoding="utf-8") as f:
         f.write(rendered_doc.model_dump_json(indent=2))
 
-    # tracer.event(
-    #     "create_document",
-    #     "render_completed",
-    #     {"page_count": len(target_doc_images)},
-    # )
-    # tracer.event(
-    #     "create_document",
-    #     "run_completed",
+    return rendered_doc
+ #     "run_completed",
     #     {"output_dir": output_dir},
     # )
 

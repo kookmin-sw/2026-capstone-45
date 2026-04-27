@@ -24,7 +24,6 @@ from llm2doc.artifact.ocr import OCRArtifact
 from llm2doc.artifact.semantic import SemanticArtifact
 from llm2doc.bm25_search import BM25Document, BM25SearchClient, LocalBM25SearchClient
 from llm2doc.context.write import WriteContext
-from llm2doc.dummy_tracer import DummyTracer
 
 
 COLLECTION_NAME = "docs_v2_semantic"
@@ -611,7 +610,7 @@ class ToolSearchSourceDocument:
         self,
         src_docs: Sequence[OCRArtifact],
         client: AsyncOpenAI,
-        tracer: DummyTracer,
+        ctx: WriteContext,
         bm25_client: BM25SearchClient | None = None,
         *,
         semantic_artifacts: Sequence[SemanticArtifact | None] | None = None,
@@ -624,7 +623,7 @@ class ToolSearchSourceDocument:
 
         self.client = client
         self.records_by_id: dict[str, SearchRecord] = {}
-        self.tracer = tracer
+        self.ctx = ctx
         self.collection: Any = collection_override
         self.chroma: Any = None
         self._snapshot_counter = 0
@@ -705,24 +704,11 @@ class ToolSearchSourceDocument:
         return {"type": "function_call_output", "output": output, "call_id": call_id}
 
     def _trace_event(self, event: str, payload: dict[str, Any]) -> None:
-        self.tracer.event("search.first_stage", event, payload)
-        self.tracer.append_jsonl(
-            "search/first_stage.jsonl",
-            {
-                "ts": datetime.now(timezone.utc).isoformat(),
-                "run_id": self.tracer.run_id,
-                "component": "search.first_stage",
-                "event": event,
-                "payload": payload,
-            },
-        )
+        self.ctx.append_trace_sync({"type": event, "component": "search.first_stage", **payload})
 
     def _save_snapshot(self, kind: str, payload: Any) -> None:
         self._snapshot_counter += 1
-        self.tracer.save_json(
-            f"search/first_stage_response_{self._snapshot_counter:03d}.json",
-            {"kind": kind, "payload": payload},
-        )
+        self.ctx.append_log_sync(kind, file=json.dumps(payload, ensure_ascii=False, indent=2))
 
     def _build_query_profile(self, query: str) -> QueryProfile:
         normalized_query = _normalize_query_text(query)
