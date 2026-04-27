@@ -1,14 +1,14 @@
 from dataclasses import asdict, replace
 from typing import Optional, Tuple
 
-from llm2doc.semantic_pipeline.semantic.semantic_backends.qwen_api import QwenAPIBackend
-from llm2doc.semantic_pipeline.semantic.semantic_schema import (
+from llm2doc.artifact.semantic.semantic_pipeline.semantic.semantic_backends.qwen_api import QwenAPIBackend
+from llm2doc.artifact.semantic.semantic_pipeline.semantic.semantic_schema import (
     enrich_generated_role,
     normalize_decision,
     parse_role_decision,
     validate_role_pair,
 )
-from llm2doc.semantic_pipeline.semantic.semantic_types import (
+from llm2doc.artifact.semantic.semantic_pipeline.semantic.semantic_types import (
     BlockContextPayload,
     RoleDecision,
     RoleTraceEntry,

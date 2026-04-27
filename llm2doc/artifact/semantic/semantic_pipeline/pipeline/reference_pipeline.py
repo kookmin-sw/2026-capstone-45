@@ -1,12 +1,12 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from llm2doc.semantic_pipeline.analysis.archetypes import (
+from llm2doc.artifact.semantic.semantic_pipeline.analysis.archetypes import (
     classify_page,
     detect_document_family,
     detect_language_from_pages,
 )
-from llm2doc.semantic_pipeline.analysis.template import (
+from llm2doc.artifact.semantic.semantic_pipeline.analysis.template import (
     anchor_pages_from_analyses,
     build_image_slots,
     build_section_order,
@@ -15,17 +15,17 @@ from llm2doc.semantic_pipeline.analysis.template import (
     detect_repeating_elements,
     page_specs_from_analysis,
 )
-from llm2doc.semantic_pipeline.common.types import CanonicalPage, ReferenceTemplate, dataclass_to_dict
-from llm2doc.semantic_pipeline.common.utils import ensure_dir, save_json, stable_hash
-from llm2doc.semantic_pipeline.parsing.canonicalize import build_canonical_page
-from llm2doc.semantic_pipeline.parsing.llm2doc_adapter import (
+from llm2doc.artifact.semantic.semantic_pipeline.common.types import CanonicalPage, ReferenceTemplate, dataclass_to_dict
+from llm2doc.artifact.semantic.semantic_pipeline.common.utils import ensure_dir, save_json, stable_hash
+from llm2doc.artifact.semantic.semantic_pipeline.parsing.canonicalize import build_canonical_page
+from llm2doc.artifact.semantic.semantic_pipeline.parsing.llm2doc_adapter import (
     build_llm2doc_page_sources,
     load_llm2doc_pages,
     resolve_llm2doc_reference_path,
     save_llm2doc_artifacts,
 )
-from llm2doc.semantic_pipeline.semantic.semantic import apply_financial_semantic_overlay
-from llm2doc.semantic_pipeline.semantic.semantic_types import SemanticConfig
+from llm2doc.artifact.semantic.semantic_pipeline.semantic.semantic import apply_financial_semantic_overlay
+from llm2doc.artifact.semantic.semantic_pipeline.semantic.semantic_types import SemanticConfig
 
 
 def load_llm2doc_paddle_pages(reference_path: str, llm2doc_root: str) -> Tuple[List[CanonicalPage], Dict[str, Any]]:

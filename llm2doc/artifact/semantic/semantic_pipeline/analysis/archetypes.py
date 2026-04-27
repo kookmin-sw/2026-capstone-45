@@ -142,7 +142,9 @@ def detect_document_family(pages: Sequence[CanonicalPage], analyses: Sequence[Pa
         for block in page.blocks:
             if has_financial_signal(block.text):
                 financial_hits += 1
-    if financial_hits >= 2 or (TICKER_RE.search(joined_text) and ("목표주가" in joined_text or "buy" in joined_text.lower())):
+    if financial_hits >= 2 or (
+        TICKER_RE.search(joined_text) and ("목표주가" in joined_text or "buy" in joined_text.lower())
+    ):
         return "financial_report"
 
     total_tables = sum(1 for page in pages for block in page.blocks if block.canonical_label == "table")

@@ -97,7 +97,7 @@ SEMANTIC_METRIC_MEANINGS = {
     "fallback_count": "모델 결과 대신 fallback이 적용된 블록 수입니다.",
     "needs_review_count": "사람 검토 플래그가 켜진 블록 수입니다.",
     "avg_role_confidence": "최종 semantic 결정들의 평균 confidence입니다.",
-    }
+}
 
 JSON_ARTIFACT_GUIDE = [
     (
@@ -277,7 +277,11 @@ def _summary_cards(template: Dict[str, object]) -> str:
         ("Document Family", template.get("document_family"), "문서군 분류 결과"),
         ("Language", template.get("language"), "감지된 언어"),
         ("OCR Engine", ", ".join(template.get("source_engines", [])), "현재 파이프라인이 사용하는 OCR 엔진"),
-        ("Anchor Pages", ", ".join(str(page) for page in template.get("anchor_pages", [])) or "-", "문서 구조의 기준 페이지"),
+        (
+            "Anchor Pages",
+            ", ".join(str(page) for page in template.get("anchor_pages", [])) or "-",
+            "문서 구조의 기준 페이지",
+        ),
         ("Review Required", template.get("confidence_summary", {}).get("review_required"), "사람 검토 필요 여부"),
         ("Unsupported For MVP", template.get("unsupported_for_mvp"), "현재 범위에서 지원 불가 여부"),
     ]
@@ -370,7 +374,10 @@ def _warning_list_html(template: Dict[str, object]) -> str:
     for warning in warnings:
         items.append(
             '<li><strong>%s</strong><div class="list-hint">%s</div></li>'
-            % (_escape(warning), _escape(WARNING_MEANINGS.get(warning, "파이프라인이 주의가 필요하다고 표시한 항목입니다.")))
+            % (
+                _escape(warning),
+                _escape(WARNING_MEANINGS.get(warning, "파이프라인이 주의가 필요하다고 표시한 항목입니다.")),
+            )
         )
     return '<ul class="warning-list">%s</ul>' % "".join(items)
 
@@ -382,7 +389,7 @@ def _confidence_summary_html(template: Dict[str, object]) -> str:
     rows = []
     for key, value in summary.items():
         rows.append(
-            '<tr><td>%s</td><td>%s</td><td>%s</td></tr>'
+            "<tr><td>%s</td><td>%s</td><td>%s</td></tr>"
             % (
                 _escape(key),
                 _escape(_format_value(value)),
@@ -453,7 +460,7 @@ def _breakdown_table_html(title: str, data: Dict[str, object], meaning_map: Dict
         except Exception:
             numeric_value = None
         rows.append(
-            '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>'
+            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
             % (
                 _escape(key),
                 _escape(_format_value(value)),
@@ -491,7 +498,7 @@ def _semantic_metric_table_html(diagnostics: Dict[str, object]) -> str:
         if key not in semantic:
             continue
         rows.append(
-            '<tr><td>%s</td><td>%s</td><td>%s</td></tr>'
+            "<tr><td>%s</td><td>%s</td><td>%s</td></tr>"
             % (
                 _escape(key),
                 _escape(_format_value(semantic.get(key))),
@@ -949,7 +956,7 @@ def render_reference_visualization(
       {_semantic_overlay_table_html(semantic_overlay, block_lookup)}
     </section>
 
-    {''.join(page_sections)}
+    {"".join(page_sections)}
 
     <section class="panel" style="margin-bottom:24px;">
       <h2>Raw JSON Inspectors</h2>

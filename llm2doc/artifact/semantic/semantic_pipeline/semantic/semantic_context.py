@@ -1,10 +1,10 @@
 import math
 from typing import Any, Dict, List, Sequence
 
-from llm2doc.semantic_pipeline.semantic.semantic_schema import DOMAIN_ROLES, GENERIC_ROLES
-from llm2doc.semantic_pipeline.semantic.semantic_types import BlockContextPayload, SemanticConfig
-from llm2doc.semantic_pipeline.common.types import CanonicalBlock, CanonicalPage, PageAnalysis
-from llm2doc.semantic_pipeline.common.utils import clean_text
+from llm2doc.artifact.semantic.semantic_pipeline.semantic.semantic_schema import DOMAIN_ROLES, GENERIC_ROLES
+from llm2doc.artifact.semantic.semantic_pipeline.semantic.semantic_types import BlockContextPayload, SemanticConfig
+from llm2doc.artifact.semantic.semantic_pipeline.common.types import CanonicalBlock, CanonicalPage, PageAnalysis
+from llm2doc.artifact.semantic.semantic_pipeline.common.utils import clean_text
 
 
 TEXTUAL_LABELS = {

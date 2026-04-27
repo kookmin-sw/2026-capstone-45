@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from llm2doc.artifact.base import ArtifactPipeline
 from llm2doc.artifact.ocr import OCRArtifactPipeline
 from llm2doc.artifact.style import StyleArtifactPipeline
+from llm2doc.artifact.semantic import SemanticArtifactPipeline
 from llm2doc.context.document import DocumentContext
 from llm2doc.context.pipeline import PipelineContext
 from llm2doc.entity import Document
@@ -22,6 +23,7 @@ from llm2doc.util import join_thread_async
 PIPELINES: Sequence[Type[ArtifactPipeline]] = [
     OCRArtifactPipeline,
     StyleArtifactPipeline,
+    SemanticArtifactPipeline,
 ]
 
 

@@ -21,6 +21,7 @@ from openai import AsyncOpenAI
 from openai.types.responses.response_input_param import FunctionCallOutput
 
 from llm2doc.artifact.ocr import OCRArtifact
+from llm2doc.artifact.semantic import SemanticArtifact
 from llm2doc.bm25_search import BM25Document, BM25SearchClient, LocalBM25SearchClient
 from llm2doc.context.write import WriteContext
 from llm2doc.dummy_tracer import DummyTracer
@@ -472,190 +473,93 @@ def _collection_metadata(record: SearchRecord) -> dict[str, Any]:
     }
 
 
-# semantic artifact가 존재하면 더 풍부한 블록 정보를 쓰고,
-# 없으면 OCR 원본 블록을 fallback으로 사용한다.
-# TODO: semantic artifact가 DB 기반으로 마이그레이션되면 아래 로직을 복구한다.
-# def _load_semantic_artifact_pages(
-#     doc: str,
-#     page_count: int,
-#     artifacts_root: Path = ARTIFACTS_ROOT,
-# ) -> dict[int, dict[str, Any]]:
-#     matched_pages: dict[int, dict[str, Any]] = {}
-#
-#     if not artifacts_root.exists():
-#         return matched_pages
-#
-#     for artifact_root in sorted(artifacts_root.iterdir(), key=lambda path: path.name):
-#         reference_dir = artifact_root / "01_reference"
-#         canonical_pages_path = reference_dir / "canonical_pages.json"
-#         semantic_overlay_path = reference_dir / "semantic_overlay.json"
-#
-#         if not canonical_pages_path.exists() or not semantic_overlay_path.exists():
-#             continue
-#
-#         try:
-#             canonical_pages = _load_json(canonical_pages_path)
-#             semantic_overlay = _load_json(semantic_overlay_path)
-#         except (OSError, json.JSONDecodeError):
-#             continue
-#
-#         if not isinstance(canonical_pages, list) or not isinstance(semantic_overlay, list):
-#             continue
-#
-#         overlay_by_block_id = {
-#             _coerce_text(entry.get("block_id")): entry
-#             for entry in semantic_overlay
-#             if isinstance(entry, dict) and _coerce_text(entry.get("block_id"))
-#         }
-#
-#         for canonical_page in canonical_pages:
-#             if not isinstance(canonical_page, dict):
-#                 continue
-#
-#             sample_id = _coerce_text(canonical_page.get("sample_id")).strip()
-#             if not _sample_matches_doc(sample_id, doc):
-#                 continue
-#
-#             page_index = _sample_to_doc_page_index(
-#                 sample_id,
-#                 doc,
-#                 page_count,
-#                 canonical_page.get("page"),
-#             )
-#             if page_index is None:
-#                 continue
-#
-#             blocks = canonical_page.get("blocks")
-#             width = canonical_page.get("width")
-#             height = canonical_page.get("height")
-#             if not isinstance(blocks, list) or not isinstance(width, int) or not isinstance(height, int):
-#                 continue
-#
-#             candidate = {
-#                 "sample_id": sample_id,
-#                 "width": width,
-#                 "height": height,
-#                 "blocks": blocks,
-#                 "overlay_by_block_id": overlay_by_block_id,
-#             }
-#             current = matched_pages.get(page_index)
-#             if current is None or len(blocks) > len(current["blocks"]):
-#                 matched_pages[page_index] = candidate
-#
-#     return matched_pages
-
-
-# def _build_semantic_records_for_page(
-#     doc: str,
-#     page_index: int,
-#     artifact_page: dict[str, Any],
-# ) -> list[SearchRecord]:
-#     width = int(artifact_page["width"])
-#     height = int(artifact_page["height"])
-#     overlay_by_block_id = artifact_page["overlay_by_block_id"]
-#     records: list[SearchRecord] = []
-#
-#     for ordinal, block in enumerate(artifact_page["blocks"], start=1):
-#         if not isinstance(block, dict):
-#             continue
-#
-#         text = _coerce_text(block.get("text"))
-#         if not _should_index_text(text):
-#             continue
-#
-#         bbox = _coerce_bbox(block.get("bbox_px"))
-#         if bbox is None:
-#             continue
-#
-#         display_block_id = _coerce_text(block.get("block_id")).strip() or f"{doc}-page-{page_index + 1}-block-{ordinal}"
-#         overlay = overlay_by_block_id.get(display_block_id, {})
-#
-#         generic_role = _coerce_role(overlay.get("generic_role") if isinstance(overlay, dict) else None) or _coerce_role(block.get("generic_role"))
-#         domain_role = _coerce_role(overlay.get("domain_role") if isinstance(overlay, dict) else None) or _coerce_role(block.get("domain_role"))
-#         generated_role_name = _coerce_role(overlay.get("generated_role_name") if isinstance(overlay, dict) else None) or _coerce_role(block.get("generated_role_name"))
-#         section_purpose = _coerce_role(overlay.get("section_purpose") if isinstance(overlay, dict) else None) or _coerce_role(block.get("section_purpose"))
-#         role_confidence = _coerce_float(overlay.get("role_confidence") if isinstance(overlay, dict) else None)
-#         if role_confidence == 0.0:
-#             role_confidence = _coerce_float(block.get("role_confidence"))
-#         semantic_needs_review = _coerce_bool(overlay.get("semantic_needs_review") if isinstance(overlay, dict) else None)
-#         if not semantic_needs_review:
-#             semantic_needs_review = _coerce_bool(block.get("semantic_needs_review"))
-#
-#         records.append(
-#             SearchRecord(
-#                 record_id=f"semantic:{doc}:{display_block_id}",
-#                 doc_id=doc,
-#                 page=page_index,
-#                 display_block_id=display_block_id,
-#                 embedding_text=_build_embedding_text(
-#                     doc_id=doc,
-#                     page_id=page_index + 1,
-#                     content=text,
-#                     generic_role=generic_role,
-#                     domain_role=domain_role,
-#                     generated_role_name=generated_role_name,
-#                     section_purpose=section_purpose,
-#                 ),
-#                 display_html=_render_structured_html(
-#                     display_block_id,
-#                     bbox,
-#                     width,
-#                     height,
-#                     text,
-#                     is_html=_looks_like_table_html(text),
-#                 ),
-#                 generic_role=generic_role,
-#                 domain_role=domain_role,
-#                 generated_role_name=generated_role_name,
-#                 section_purpose=section_purpose,
-#                 role_confidence=role_confidence,
-#                 semantic_needs_review=semantic_needs_review,
-#                 source_kind="semantic",
-#             )
-#         )
-#
-#     return records
-
-
 def _build_search_records(
     src_docs: dict[int, OCRArtifact],
+    semantic_docs: dict[int, SemanticArtifact] | None = None,
 ) -> dict[str, SearchRecord]:
     records: dict[str, SearchRecord] = {}
 
-    for doc_id, artifact in src_docs.items():
-        for page_index, page in enumerate(artifact.pages):
-            for block_index, block in enumerate(page.blocks, start=1):
-                text = block.content or ""
-                if not _should_index_text(text):
-                    continue
+    for doc_id, ocr_artifact in src_docs.items():
+        sem_artifact = semantic_docs.get(doc_id) if semantic_docs else None
 
-                display_block_id = f"page-{page_index + 1}-block-{block_index}"
-                records[f"fallback:{doc_id}:{page_index + 1}:{block_index}"] = SearchRecord(
-                    record_id=f"fallback:{doc_id}:{page_index + 1}:{block_index}",
-                    doc_id=doc_id,
-                    page=page_index,
-                    display_block_id=display_block_id,
-                    embedding_text=_build_embedding_text(
+        for page_index, ocr_page in enumerate(ocr_artifact.pages):
+            sem_page = None
+            if sem_artifact and page_index < len(sem_artifact.canonical_pages):
+                sem_page = sem_artifact.canonical_pages[page_index]
+
+            if sem_page:
+                for block_index, sem_block in enumerate(sem_page.blocks, start=1):
+                    text = sem_block.text or ""
+                    if not _should_index_text(text):
+                        continue
+
+                    display_block_id = f"page-{page_index + 1}-block-{block_index}"
+                    ocr_block = (
+                        ocr_page.blocks[block_index - 1]
+                        if block_index <= len(ocr_page.blocks)
+                        else None
+                    )
+
+                    records[f"semantic:{doc_id}:{page_index + 1}:{block_index}"] = SearchRecord(
+                        record_id=f"semantic:{doc_id}:{page_index + 1}:{block_index}",
                         doc_id=doc_id,
-                        page_id=page_index + 1,
-                        content=text,
+                        page=page_index,
+                        display_block_id=display_block_id,
+                        embedding_text=_build_embedding_text(
+                            doc_id=doc_id,
+                            page_id=page_index + 1,
+                            content=text,
+                            generic_role=sem_block.generic_role,
+                            domain_role=sem_block.domain_role,
+                            generated_role_name=sem_block.generated_role_name,
+                            section_purpose=sem_block.section_purpose,
+                        ),
+                        display_html=(
+                            ocr_block.to_structured_html(ocr_page, block_id=display_block_id)
+                            if ocr_block
+                            else ""
+                        ),
+                        generic_role=sem_block.generic_role,
+                        domain_role=sem_block.domain_role,
+                        generated_role_name=sem_block.generated_role_name,
+                        section_purpose=sem_block.section_purpose,
+                        role_confidence=sem_block.role_confidence or 0.0,
+                        semantic_needs_review=sem_block.semantic_needs_review or False,
+                        source_kind="semantic",
+                    )
+            else:
+                for block_index, block in enumerate(ocr_page.blocks, start=1):
+                    text = block.content or ""
+                    if not _should_index_text(text):
+                        continue
+
+                    display_block_id = f"page-{page_index + 1}-block-{block_index}"
+                    records[f"fallback:{doc_id}:{page_index + 1}:{block_index}"] = SearchRecord(
+                        record_id=f"fallback:{doc_id}:{page_index + 1}:{block_index}",
+                        doc_id=doc_id,
+                        page=page_index,
+                        display_block_id=display_block_id,
+                        embedding_text=_build_embedding_text(
+                            doc_id=doc_id,
+                            page_id=page_index + 1,
+                            content=text,
+                            generic_role=None,
+                            domain_role=None,
+                            generated_role_name=None,
+                            section_purpose=None,
+                        ),
+                        display_html=block.to_structured_html(
+                            ocr_page,
+                            block_id=display_block_id,
+                        ),
                         generic_role=None,
                         domain_role=None,
                         generated_role_name=None,
                         section_purpose=None,
-                    ),
-                    display_html=block.to_structured_html(
-                        page,
-                        block_id=display_block_id,
-                    ),
-                    generic_role=None,
-                    domain_role=None,
-                    generated_role_name=None,
-                    section_purpose=None,
-                    role_confidence=0.0,
-                    semantic_needs_review=False,
-                    source_kind="fallback",
-                )
+                        role_confidence=0.0,
+                        semantic_needs_review=False,
+                        source_kind="fallback",
+                    )
 
     return records
 
@@ -710,6 +614,7 @@ class ToolSearchSourceDocument:
         tracer: DummyTracer,
         bm25_client: BM25SearchClient | None = None,
         *,
+        semantic_artifacts: Sequence[SemanticArtifact | None] | None = None,
         force_rebuild: bool = False,
         records_override: dict[str, SearchRecord] | None = None,
         collection_override: Any = None,
@@ -726,6 +631,11 @@ class ToolSearchSourceDocument:
         self.force_rebuild = force_rebuild
         self.doc_ids = list(range(1, len(src_docs) + 1))
         src_docs_dict = {i: doc for i, doc in enumerate(src_docs, start=1)}
+        semantic_docs_dict = (
+            {i: sem for i, sem in enumerate(semantic_artifacts, start=1) if sem is not None}
+            if semantic_artifacts
+            else {}
+        )
 
         self.description = {
             "type": "function",
@@ -770,7 +680,7 @@ class ToolSearchSourceDocument:
                         name=COLLECTION_NAME,
                         embedding_function=embedding_function,
                     )
-                    self.records_by_id = _build_search_records(src_docs_dict)
+                    self.records_by_id = _build_search_records(src_docs_dict, semantic_docs_dict)
                 else:
                     raise chromadb.errors.NotFoundError("Collection rebuild requested.")
             except chromadb.errors.NotFoundError:
@@ -778,7 +688,7 @@ class ToolSearchSourceDocument:
                     name=COLLECTION_NAME,
                     embedding_function=embedding_function,
                 )
-                all_records = _build_search_records(src_docs_dict)
+                all_records = _build_search_records(src_docs_dict, semantic_docs_dict)
                 _populate_collection(self.collection, all_records.values())
                 self.records_by_id = all_records
 

@@ -14,6 +14,7 @@ from openai.types.responses.response_input_param import ResponseInputParam
 
 from llm2doc.artifact.ocr import OCRArtifact, OCRArtifactPipeline
 from llm2doc.artifact.style import StyleArtifact, StyleArtifactPipeline
+from llm2doc.artifact.semantic import SemanticArtifact, SemanticArtifactPipeline
 from llm2doc.artifact.run import build_artifact, get_or_build_artifact
 from llm2doc.context.write import WriteContext
 from llm2doc.render_image import render_document, render_page, RenderedPage
@@ -167,70 +168,6 @@ PROMPT_FINAL_DOCUMENT_RETRY = (
     "If you currently have only <page> blocks, wrap them in the required <document> block yourself. "
     "Do not call more tools. Do not add explanations, markdown fences, or any extra text."
 )
-
-
-def _semantic_artifact_dir(artifacts_root: Path, doc_id: str) -> Path:
-    raise RuntimeError("todo")
-    return artifacts_root / f"{doc_id}-00" / "01_reference"
-
-
-def _has_semantic_artifact(artifacts_root: Path, doc_id: str) -> bool:
-    raise RuntimeError("todo")
-    artifact_dir = _semantic_artifact_dir(artifacts_root, doc_id)
-    return (artifact_dir / "canonical_pages.json").exists() and (artifact_dir / "semantic_overlay.json").exists()
-
-
-def _semantic_visualization_path(artifacts_root: Path, doc_id: str) -> Path:
-    raise RuntimeError("todo")
-    return _semantic_artifact_dir(artifacts_root, doc_id) / "reference_visualization.html"
-
-
-def ensure_semantic_artifacts(
-    doc_ids: Sequence[str],
-    artifacts_root: Path,
-    tracer: DummyTracer | None = None,
-) -> bool:
-    return False
-
-    from llm2doc.artifact.semantic.pipeline.reference_pipeline import parse_reference
-    from llm2doc.artifact.semantic.semantic.semantic_types import SemanticConfig
-
-    created_any = False
-
-    for doc_id in doc_ids:
-        if _has_semantic_artifact(artifacts_root, doc_id):
-            if tracer is not None:
-                tracer.event(
-                    "semantic_artifacts",
-                    "artifact_reused",
-                    {"document_id": doc_id, "artifact_dir": str(_semantic_artifact_dir(artifacts_root, doc_id))},
-                )
-            continue
-
-        if tracer is not None:
-            tracer.event(
-                "semantic_artifacts",
-                "artifact_generation_started",
-                {"document_id": doc_id, "artifact_dir": str(_semantic_artifact_dir(artifacts_root, doc_id))},
-            )
-
-        parse_reference(
-            job_id=f"{doc_id}-00",
-            reference_path=doc_id,
-            artifacts_root=str(artifacts_root),
-            semantic_config=SemanticConfig(mode="qwen", runtime="api"),
-            llm2doc_root=str(PROJECT_ROOT),
-        )
-        created_any = True
-
-        if tracer is not None:
-            tracer.event(
-                "semantic_artifacts",
-                "artifact_generation_completed",
-                {"document_id": doc_id, "artifact_dir": str(_semantic_artifact_dir(artifacts_root, doc_id))},
-            )
-
-    return created_any
 
 
 def pydantic_encoder(obj):
@@ -550,6 +487,7 @@ async def write_document(
     target_doc: OCRArtifact,
     tracer: DummyTracer,
     *,
+    semantic_artifacts: Sequence[SemanticArtifact | None] | None = None,
     component: str,
 ) -> str:
     """LLM과 도구 호출 루프를 돌며 최종 문서 블록을 생성한다."""
@@ -567,6 +505,7 @@ async def write_document(
             src_docs,
             client=client,
             tracer=tracer,
+            semantic_artifacts=semantic_artifacts,
         ),
     ]
 
@@ -709,10 +648,14 @@ async def create_document(
     await build_artifact(ctx.pipeline_ctx.engine, [ctx.target_doc_id, *ctx.source_doc_ids])
 
     src_docs_parsed: list[OCRArtifact] = []
+    src_sem_artifacts: list[SemanticArtifact] = []
 
     for src_doc in ctx.source_doc_ids:
         ocr = await get_or_build_artifact(ctx.pipeline_ctx.engine, src_doc, OCRArtifactPipeline)
         src_docs_parsed.append(ocr)
+
+        sem = await get_or_build_artifact(ctx.pipeline_ctx.engine, src_doc, SemanticArtifactPipeline)
+        src_sem_artifacts.append(sem)
 
     target_doc_parsed: OCRArtifact = await get_or_build_artifact(
         ctx.pipeline_ctx.engine, ctx.target_doc_id, OCRArtifactPipeline
@@ -738,6 +681,7 @@ async def create_document(
         src_docs_parsed,
         target_doc_parsed,
         tracer,
+        semantic_artifacts=src_sem_artifacts,
         component="create_document",
     )
 
