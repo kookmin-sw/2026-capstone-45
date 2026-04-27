@@ -22,9 +22,9 @@ from llm2doc.entity.message import MessageDepth
 from llm2doc.render_image import render_document, render_page, RenderedPage
 from llm2doc.tool_fetch_source_document import ToolFetchSourceDocument
 from llm2doc.tool_search_source_document import ToolSearchSourceDocument
-from llm2doc.repository.artifact import load_artifact
 from llm2doc.repository.document import load_document_image_all
 from llm2doc.repository.file import get_file_path
+from llm2doc.repository.chat import save_rendered_document
 
 
 PROMPT_WRITE = """
@@ -732,21 +732,13 @@ async def create_document(
         }
     )
 
-    rendered_pages: list[RenderedPage] = []
+    def finalize_render():
+        rendered_pages: list[RenderedPage] = []
 
-    for i, (page, img) in enumerate(zip(target_doc_parsed.pages, target_doc_images)):
-        rendered_pages.append(
-            await asyncio.to_thread(render_page, page, img, htmls[i], target_doc_style.pages[i], f"page-{i + 1}")
-        )
+        for i, (page, img) in enumerate(zip(target_doc_parsed.pages, target_doc_images)):
+            rendered_pages.append(render_page(page, img, htmls[i], target_doc_style.pages[i], f"page-{i + 1}"))
 
-    rendered_doc = render_document(rendered_pages)
+        return render_document(rendered_pages)
 
-    with open("debug_final.json", "wt", encoding="utf-8") as f:
-        f.write(rendered_doc.model_dump_json(indent=2))
-
-    return rendered_doc
- #     "run_completed",
-    #     {"output_dir": output_dir},
-    # )
-
-    return rendered_doc
+    rendered_doc = await asyncio.to_thread(finalize_render)
+    await save_rendered_document(db, ctx.chat_id, rendered_doc.model_dump_json())

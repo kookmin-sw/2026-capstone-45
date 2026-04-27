@@ -12,7 +12,7 @@ from .document import Document, DocumentStatus
 from .file import File
 
 
-DB_SCHEMA_VERSION = 5
+DB_SCHEMA_VERSION = 6
 
 
 async def create_schema(conn: AsyncConnection):
