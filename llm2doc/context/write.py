@@ -18,6 +18,10 @@ class WriteContext:
     target_doc_id: int
     source_doc_ids: Sequence[int]
 
+    async def append_message(self, depth: MessageDepth, message: str, is_markdown: bool = False):
+        async with self.pipeline_ctx.with_db() as db:
+            await append_chat_message(db, self.chat_id, depth, message, is_markdown=is_markdown)
+
     async def append_log(self, message: str, file: str | bytes | None = None):
         async with self.pipeline_ctx.with_db() as db:
             await append_chat_message(db, self.chat_id, MessageDepth.INTERNAL, message, file)

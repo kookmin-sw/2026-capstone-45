@@ -12,11 +12,13 @@ from bs4 import BeautifulSoup
 from typing import Sequence, Any, cast
 from openai.types.responses.response_input_param import ResponseInputParam
 
+
 from llm2doc.artifact.ocr import OCRArtifact, OCRArtifactPipeline
 from llm2doc.artifact.style import StyleArtifact, StyleArtifactPipeline
 from llm2doc.artifact.semantic import SemanticArtifact, SemanticArtifactPipeline
 from llm2doc.artifact.run import build_artifact, get_or_build_artifact
 from llm2doc.context.write import WriteContext
+from llm2doc.entity.message import MessageDepth
 from llm2doc.render_image import render_document, render_page, RenderedPage
 from llm2doc.tool_fetch_source_document import ToolFetchSourceDocument
 from llm2doc.tool_search_source_document import ToolSearchSourceDocument
@@ -408,7 +410,9 @@ async def maybe_generate_analysis(
 
     # TODO
     return
-    await ctx.append_log("llm/analysis_response.json", file=json.dumps(response_to_jsonable(response), ensure_ascii=False, indent=2))
+    await ctx.append_log(
+        "llm/analysis_response.json", file=json.dumps(response_to_jsonable(response), ensure_ascii=False, indent=2)
+    )
 
     analysis = normalize_analysis_payload(
         extract_json_object(extract_response_text(response)),
@@ -450,7 +454,10 @@ async def request_final_document(
             model=os.environ["OPENAI_MODEL"],
             input=final_input,
         )
-        await ctx.append_log("llm/final_document_response.json", file=json.dumps(response_to_jsonable(response), ensure_ascii=False, indent=2))
+        await ctx.append_log(
+            "llm/final_document_response.json",
+            file=json.dumps(response_to_jsonable(response), ensure_ascii=False, indent=2),
+        )
 
         output_text = extract_response_text(response)
         last_output_text = output_text
@@ -513,7 +520,6 @@ async def write_document(
         ),
     ]
 
-    reasoning = cast(list[str], [])
     fulfiled_tool_calls: set[str] = set()
 
     input: ResponseInputParam = [
@@ -541,9 +547,7 @@ async def write_document(
             try:
                 if item.type == "reasoning" and item.content is not None:
                     for content in item.content:
-                        reasoning.append(content.text)
-                elif item.type == "function_call" and item.arguments is not None:
-                    reasoning.append(f"function_call={item.name} {item.arguments}")
+                        await ctx.append_message(MessageDepth.REASONING, content.text)
             except Exception:
                 pass
 
@@ -578,6 +582,12 @@ async def write_document(
             fulfiled_tool_calls.add(tool_call.call_id)
             result = await tool.invoke(tool_call.arguments, tool_call.call_id)
             input.append(result)
+
+            await ctx.append_message(
+                MessageDepth.TOOL_CALL,
+                json.dumps({"arguments": tool_call.arguments, "output": result}, ensure_ascii=False),
+            )
+
             await ctx.append_trace(
                 {
                     "type": "tool_result",
@@ -606,7 +616,6 @@ async def write_document(
         "debug_write_input", file=json.dumps(input, ensure_ascii=False, indent=2, default=pydantic_encoder)
     )
     await ctx.append_log("debug_write_output", file=final_document_text)
-    await ctx.append_log("debug_write_reason", file="\n----------\n".join(reasoning))
 
     print("Generation finished successfully.")
 
@@ -621,6 +630,10 @@ async def create_document(
     """문서 생성부터 결과 이미지 렌더링까지 전체 작업을 수행한다."""
     if query is None:
         query = "소스 문서 내용을 기반으로 작성해줘."
+
+    from llm2doc.entity.message import MessageDepth
+
+    await ctx.append_message(MessageDepth.USER, query, is_markdown=True)
 
     # output_dir_name = RESULT_OUTPUT_DIR_NAME or f"{'_'.join(src_docs)}_{target_doc}"
     # output_dir = os.path.join(RESULT_OUTPUT_ROOT, output_dir_name)

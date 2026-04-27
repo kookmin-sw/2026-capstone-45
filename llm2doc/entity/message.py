@@ -25,7 +25,10 @@ class MessageDepth(enum.IntEnum):
     """depth가 이 값 미만이면 유저에게 기본으로 보임"""
 
     REASONING = 50
-    """LLM reasoning과 tool call"""
+    """LLM reasoning"""
+
+    TOOL_CALL = 51
+    """LLM tool call"""
 
     INTERNAL = 60
     """시스템 내부적으로 생성한 로그"""
