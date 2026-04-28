@@ -7,20 +7,19 @@ import { useAppStore } from "#root/store/useAppStore";
 
 export const ChatView = () => {
 	const { activeChatId } = useAppStore();
-	const { data, isLoading } = useQueryChatDetail(Number(activeChatId));
+	const { data, isLoading } = useQueryChatDetail(
+		Number(activeChatId),
+		activeChatId !== null,
+	);
 
-	if (isLoading) {
-		return (
-			<div className="flex-1 flex items-center justify-center">Loading...</div>
-		);
-	}
+	const isReady = !isLoading && activeChatId !== null;
 
 	return (
 		<div className="flex-1 flex overflow-hidden">
 			{/* Left Half: Chat */}
 			<div className="w-1/2 flex flex-col border-r border-border relative">
 				<div className="flex-1 overflow-y-auto p-6">
-					<MessageList messages={data?.messages || []} />
+					{isReady && <MessageList messages={data?.messages || []} />}
 				</div>
 				<ChatBox onSubmit={() => {}} onStop={() => {}} isStreaming={false} />
 			</div>

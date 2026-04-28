@@ -1,5 +1,4 @@
 import { notifications } from "@mantine/notifications";
-import { useState } from "react";
 import { ChatBox } from "#root/component/ChatBox";
 import { DocumentCard } from "#root/component/DocumentCard.tsx";
 import { DocumentCardList } from "#root/component/DocumentCardList.tsx";
@@ -7,14 +6,14 @@ import { EmptyDocumentList } from "#root/component/EmptyDocumentList.tsx";
 import { useMutateCreateChat } from "#root/query/createChat";
 import { type Document, useQueryDocumentList } from "#root/query/documentList";
 import { useAppStore } from "#root/store/useAppStore";
+import { useNewChatStore } from "#root/store/useNewChatStore";
 
 export const NewChatView = () => {
 	const { data } = useQueryDocumentList();
 	const { mutateAsync: createChat } = useMutateCreateChat();
-	const { setActiveChat } = useAppStore();
-
-	const [targetDoc, setTargetDoc] = useState<number | null>(null);
-	const [sourceDocs, setSourceDocs] = useState<number[]>([]);
+	const { setActiveChat, setView } = useAppStore();
+	const { targetDoc, sourceDocs, setTargetDoc, setSourceDocs, reset } =
+		useNewChatStore();
 
 	const isDocValid = targetDoc !== null && sourceDocs.length !== 0;
 
@@ -25,6 +24,9 @@ export const NewChatView = () => {
 			// UI상 어짜피 막혀있음
 			return;
 		}
+
+		setView("CHAT");
+
 		try {
 			const chatId = await createChat({
 				target_doc: targetDoc,
@@ -32,6 +34,7 @@ export const NewChatView = () => {
 				query,
 			});
 			setActiveChat(chatId.toString());
+			reset();
 		} catch (error) {
 			console.error(error);
 			notifications.show({
@@ -39,6 +42,11 @@ export const NewChatView = () => {
 				message: "채팅을 생성하는데 실패했습니다",
 				color: "red",
 			});
+
+			const state = useAppStore.getState();
+			if (state.view === "CHAT" && state.activeChatId === null) {
+				state.setView("NEW_CHAT");
+			}
 		}
 	};
 
