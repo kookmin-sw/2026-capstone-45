@@ -18,7 +18,9 @@ export const useAppStore = create<AppState>((set) => ({
 	setView: (view) =>
 		set((state) => ({
 			view,
-			// Auto-fold sidebar if transitioning to ARTIFACT view
+			// NEW_CHAT으로 이동했다면 채팅을 선택 해제함
+			activeChatId: view === "NEW_CHAT" ? null : state.activeChatId,
+			// ARTIFACT로 이동했다면 사이드바를 접음
 			sidebarFolded: view === "CHAT_AND_ARTIFACT" ? true : state.sidebarFolded,
 		})),
 	setSidebarFolded: (sidebarFolded) => set({ sidebarFolded }),
