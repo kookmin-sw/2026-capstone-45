@@ -67,39 +67,25 @@ export const MessageList = ({ messages }: MessageListProps) => {
 				const msg = block.message;
 				const depth = msg.depth;
 
-				if (depth === 10) {
+				const roleMap: Record<number, "user" | "error" | "warning"> = {
+					10: "user",
+					20: "error",
+					30: "warning",
+				};
+
+				const role = roleMap[depth];
+				if (role) {
 					return (
 						<ChatMessage
 							// biome-ignore lint/suspicious/noArrayIndexKey: FIXME: stable order
 							key={idx}
-							role="user"
+							role={role}
 							content={msg.content}
 							extraContent={msg.extra_content}
 						/>
 					);
 				}
-				if (depth === 20) {
-					return (
-						<ChatMessage
-							// biome-ignore lint/suspicious/noArrayIndexKey: FIXME: stable order
-							key={idx}
-							role="error"
-							content={msg.content}
-							extraContent={msg.extra_content}
-						/>
-					);
-				}
-				if (depth === 30) {
-					return (
-						<ChatMessage
-							// biome-ignore lint/suspicious/noArrayIndexKey: FIXME: stable order
-							key={idx}
-							role="warning"
-							content={msg.content}
-							extraContent={msg.extra_content}
-						/>
-					);
-				}
+
 				if (depth === 50) {
 					return (
 						<FoldableMessage

@@ -2,6 +2,7 @@ import { Maximize2 } from "lucide-react";
 import { useState } from "react";
 import type { Document } from "#root/query/documentList";
 import type { MenuItem } from "#root/types";
+import { cn } from "../utils/cn";
 import { Badge } from "./Badge";
 import { ThreeDotMenu } from "./ThreeDotMenu";
 
@@ -63,13 +64,12 @@ export const DocumentCard = ({
 	if (mode === "select") {
 		return (
 			<div
-				className={`relative aspect-3/4 bg-background border-2 rounded-xl overflow-hidden transition-all group ${
-					selectionState === "target"
-						? "border-primary shadow-md"
-						: selectionState === "source"
-							? "border-secondary shadow-sm"
-							: "border-border hover:border-border/80"
-				}`}
+				className={cn(
+					"relative aspect-3/4 bg-background border-2 rounded-xl overflow-hidden transition-all group",
+					selectionState === "target" && "border-primary shadow-md",
+					selectionState === "source" && "border-secondary shadow-sm",
+					selectionState === "none" && "border-border hover:border-border/80",
+				)}
 				onMouseEnter={() => setHovered(true)}
 				onMouseLeave={() => setHovered(false)}
 			>

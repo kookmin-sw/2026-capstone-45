@@ -1,6 +1,7 @@
 import { MessageSquare } from "lucide-react";
 import type { Chat } from "#root/query/chatList";
 import type { MenuItem } from "#root/types";
+import { cn } from "../utils/cn";
 import { ThreeDotMenu } from "./ThreeDotMenu";
 
 interface ChatHistoryItemProps {
@@ -42,7 +43,10 @@ export const ChatHistoryItem = ({
 				{chat.display_name}
 			</span>
 			<div
-				className={`opacity-0 group-hover:opacity-100 transition-opacity ${active ? "opacity-100" : ""}`}
+				className={cn(
+					"opacity-0 group-hover:opacity-100 transition-opacity",
+					active && "opacity-100",
+				)}
 			>
 				<ThreeDotMenu items={menuItems} />
 			</div>

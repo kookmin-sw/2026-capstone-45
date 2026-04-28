@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import { cn } from "../utils/cn";
 import { ExtraContent } from "./ExtraContent";
 
 interface ChatMessageProps {
@@ -23,15 +24,15 @@ export const ChatMessage = ({
 			className={`flex flex-col ${isUser ? "items-end" : "items-start"} mb-4 w-full`}
 		>
 			<div
-				className={`max-w-[80%] px-4 py-2 rounded-2xl ${
-					isUser
-						? "bg-primary text-primary-foreground rounded-tr-none"
-						: isError
-							? "bg-destructive/10 text-destructive border border-destructive/20"
-							: isWarning
-								? "bg-amber-100 text-amber-900 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-100 dark:border-amber-800"
-								: "bg-muted text-foreground rounded-tl-none"
-				}`}
+				className={cn(
+					"max-w-[80%] px-4 py-2 rounded-2xl",
+					isUser && "bg-primary text-primary-foreground rounded-tr-none",
+					isError &&
+						"bg-destructive/10 text-destructive border border-destructive/20",
+					isWarning &&
+						"bg-amber-100 text-amber-900 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-100 dark:border-amber-800",
+					role === "agent" && "bg-muted text-foreground rounded-tl-none",
+				)}
 			>
 				{role === "agent" ? (
 					<div className="prose prose-sm dark:prose-invert max-w-none">

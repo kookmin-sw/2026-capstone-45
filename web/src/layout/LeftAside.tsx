@@ -2,6 +2,7 @@ import { ChevronLeft, Library, Menu, Plus } from "lucide-react";
 import { ChatHistoryItem } from "#root/component/ChatHistoryItem";
 import { type Chat, useQueryChatList } from "#root/query/chatList";
 import { useAppStore } from "#root/store/useAppStore";
+import { cn } from "../utils/cn";
 
 export const LeftAside = () => {
 	const {
@@ -33,9 +34,10 @@ export const LeftAside = () => {
 				<button
 					type="button"
 					onClick={toggleSidebar}
-					className={`p-2 rounded-lg hover:bg-muted transition-colors ${
-						sidebarFolded ? "" : "ml-auto"
-					}`}
+					className={cn(
+						"p-2 rounded-lg hover:bg-muted transition-colors",
+						!sidebarFolded && "ml-auto",
+					)}
 				>
 					{sidebarFolded ? (
 						<Menu className="w-5 h-5" />
@@ -47,34 +49,26 @@ export const LeftAside = () => {
 
 			{/* Navigation Actions */}
 			<div className="px-3 py-2 space-y-1">
-				<button
-					type="button"
-					onClick={() => setView("LIBRARY")}
-					className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-						view === "LIBRARY"
-							? "bg-primary text-primary-foreground shadow-sm"
-							: "text-muted-foreground hover:bg-muted hover:text-foreground"
-					}`}
-				>
-					<Library className="w-5 h-5 shrink-0" />
-					{!sidebarFolded && (
-						<span className="font-semibold text-sm">문서 목록</span>
-					)}
-				</button>
-				<button
-					type="button"
-					onClick={() => setView("NEW_CHAT")}
-					className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-						view === "NEW_CHAT"
-							? "bg-primary text-primary-foreground shadow-sm"
-							: "text-muted-foreground hover:bg-muted hover:text-foreground"
-					}`}
-				>
-					<Plus className="w-5 h-5 shrink-0" />
-					{!sidebarFolded && (
-						<span className="font-semibold text-sm">새 채팅</span>
-					)}
-				</button>
+				{[
+					{ id: "LIBRARY", icon: Library, label: "문서 목록" },
+					{ id: "NEW_CHAT", icon: Plus, label: "새 채팅" },
+				].map(({ id, icon: Icon, label }) => (
+					<button
+						key={id}
+						type="button"
+						onClick={() => setView(id as "LIBRARY" | "NEW_CHAT")}
+						className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
+							view === id
+								? "bg-primary text-primary-foreground shadow-sm"
+								: "text-muted-foreground hover:bg-muted hover:text-foreground"
+						}`}
+					>
+						<Icon className="w-5 h-5 shrink-0" />
+						{!sidebarFolded && (
+							<span className="font-semibold text-sm">{label}</span>
+						)}
+					</button>
+				))}
 			</div>
 
 			{/* Chat History */}
