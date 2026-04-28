@@ -28,6 +28,7 @@ class CreateChatRequest(BaseModel):
 
 
 class ChatListEntry(BaseModel):
+    chat_id: int
     display_name: str
     has_render: bool
 
@@ -81,13 +82,14 @@ async def create_chat_route(db: WithDB, thread_pool: WithThreadPool, body: Creat
     return {"chat_id": chat_id}
 
 
-@router.get("/")
+@router.get("")
 async def get_chat_list(db: WithDB):
     chats: list[ChatListEntry] = []
 
     async for now in list_chat(db):
         chats.append(
             ChatListEntry(
+                chat_id=now.chat_id,
                 display_name=now.display_name,
                 has_render=now.rendered_file_id is not None,
             )
