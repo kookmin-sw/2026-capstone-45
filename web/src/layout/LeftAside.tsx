@@ -89,9 +89,7 @@ export const LeftAside = () => {
 								key={chat.chat_id}
 								chat={chat}
 								active={activeChatId === chat.chat_id.toString()}
-								onSelect={() =>
-									setActiveChat(chat.chat_id.toString(), chat.has_render)
-								}
+								onSelect={() => setActiveChat(chat.chat_id.toString())}
 								onPin={() => {}} // TODO
 								onRename={() => {}} // TODO
 								onDelete={() => {}} // TODO

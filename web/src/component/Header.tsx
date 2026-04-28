@@ -5,7 +5,6 @@ const NAME_MAP = {
 	NEW_CHAT: "새 채팅",
 	//TODO: 채팅 제목 표시
 	CHAT: "채팅",
-	CHAT_AND_ARTIFACT: "채팅",
 };
 
 export const Header = () => {

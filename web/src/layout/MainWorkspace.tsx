@@ -1,6 +1,5 @@
 import { GhostOverlay } from "#root/component/GhostOverlay";
 import { useAppStore } from "#root/store/useAppStore";
-import { ArtifactView } from "#root/view/ArtifactView";
 import { ChatView } from "#root/view/ChatView";
 import { LibraryView } from "#root/view/LibraryView";
 import { NewChatView } from "#root/view/NewChatView";
@@ -16,8 +15,6 @@ export const MainWorkspace = () => {
 				return <NewChatView />;
 			case "CHAT":
 				return <ChatView />;
-			case "CHAT_AND_ARTIFACT":
-				return <ArtifactView />;
 			default:
 				return <NewChatView />;
 		}
