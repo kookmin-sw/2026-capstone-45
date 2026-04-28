@@ -1,14 +1,22 @@
 import ReactMarkdown from "react-markdown";
+import { ExtraContent } from "./ExtraContent";
 
 interface ChatMessageProps {
-	role: "user" | "agent" | "error";
+	role: "user" | "agent" | "error" | "warning";
 	content: string;
 	timestamp?: Date;
+	extraContent?: string | null;
 }
 
-export const ChatMessage = ({ role, content, timestamp }: ChatMessageProps) => {
+export const ChatMessage = ({
+	role,
+	content,
+	timestamp,
+	extraContent,
+}: ChatMessageProps) => {
 	const isUser = role === "user";
 	const isError = role === "error";
+	const isWarning = role === "warning";
 
 	return (
 		<div
@@ -20,7 +28,9 @@ export const ChatMessage = ({ role, content, timestamp }: ChatMessageProps) => {
 						? "bg-primary text-primary-foreground rounded-tr-none"
 						: isError
 							? "bg-destructive/10 text-destructive border border-destructive/20"
-							: "bg-muted text-foreground rounded-tl-none"
+							: isWarning
+								? "bg-amber-100 text-amber-900 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-100 dark:border-amber-800"
+								: "bg-muted text-foreground rounded-tl-none"
 				}`}
 			>
 				{role === "agent" ? (
@@ -28,11 +38,16 @@ export const ChatMessage = ({ role, content, timestamp }: ChatMessageProps) => {
 						<ReactMarkdown>{content}</ReactMarkdown>
 					</div>
 				) : (
-					<div className="whitespace-pre-wrap break-words">{content}</div>
+					<div className="whitespace-pre-wrap wrap-break-word">{content}</div>
 				)}
+
+				<ExtraContent
+					content={extraContent}
+					className="border-t border-current/10 pt-2"
+				/>
 			</div>
 			{timestamp && (
-				<span className="text-[10px] text-muted-foreground mt-1 px-1">
+				<span className="text-muted-foreground mt-1 px-1">
 					{timestamp.toLocaleTimeString(undefined, {
 						hour: "2-digit",
 						minute: "2-digit",

@@ -18,6 +18,8 @@ export const ChatDetailResponse = z.object({
 	messages: z.array(ChatMessageEntry),
 });
 
+export type ChatMessageEntry = z.infer<typeof ChatMessageEntry>;
+
 export const useQueryChatDetail = (chatId: number) =>
 	useQuery({
 		queryKey: ["useQueryChatDetail", chatId],
