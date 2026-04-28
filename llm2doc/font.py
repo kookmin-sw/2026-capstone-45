@@ -47,7 +47,7 @@ class PathToFontFamily:
             result.append(name)
             result.append("';\n")
 
-            result.append("src: url(/api/font/")
+            result.append("src: url(/api/fonts/")
             result.append(os.path.basename(path))
             result.append(") format('truetype');\n")
 
