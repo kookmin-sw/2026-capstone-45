@@ -4,6 +4,7 @@ import shutil
 import logging
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from llm2doc.artifact.run import build_artifact
 from llm2doc.server import lifespan
 from llm2doc.entity import File as FileRow, Document
 from llm2doc.route.document import create_document_worker
@@ -22,7 +23,7 @@ def find_pdf_files(data_dir: str = "data") -> list[str]:
     return sorted(pdf_files)
 
 
-async def add_all_documents(data_dir: str = "data") -> None:
+async def add_all_documents(data_dir: str = "data", build_artifacts: bool = False) -> None:
     """Scan data directory for PDF files and add them to the database."""
     pdf_files = find_pdf_files(data_dir)
 
@@ -35,6 +36,7 @@ async def add_all_documents(data_dir: str = "data") -> None:
 
     async with lifespan(None) as context:
         engine = validate_type(context["db"], AsyncEngine)
+        doc_ids: list[int] = []
 
         async with AsyncSession(engine) as db:
             for i, pdf_path in enumerate(pdf_files, 1):
@@ -57,5 +59,10 @@ async def add_all_documents(data_dir: str = "data") -> None:
 
                 # Process PDF (render pages to images)
                 await create_document_worker(engine, doc_id, file_id, "pdf")
+
+                doc_ids.append(doc_id)
+
+            if build_artifacts:
+                await build_artifact(engine, doc_ids)
 
     print(f"Done. {len(pdf_files)} PDF file(s) processed.")
