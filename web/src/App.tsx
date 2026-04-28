@@ -1,13 +1,11 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import DocumentRender from "./components/DocumentRender";
-import { queryClient } from "./constant";
+import { queryClient } from "#root/constant.ts";
+import { MainLayout } from "#root/layout/MainLayout.tsx";
 
-function App() {
+export const App = () => {
 	return (
 		<QueryClientProvider client={queryClient}>
-			<DocumentRender />
+			<MainLayout />
 		</QueryClientProvider>
 	);
-}
-
-export default App;
+};

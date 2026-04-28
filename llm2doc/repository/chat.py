@@ -23,6 +23,14 @@ async def create_chat(db: AsyncSession, name: str, target_doc: int, source_docs:
     return chat.chat_id
 
 
+async def list_chat(db: AsyncSession):
+    stmt = select(Chat).order_by(Chat.chat_id.desc())
+
+    result = await db.stream(stmt)
+    async for row in result.scalars():
+        yield row
+
+
 @beartype
 async def append_chat_message(
     db: AsyncSession,

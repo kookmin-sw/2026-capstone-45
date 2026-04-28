@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
+import { axiosInstance } from "#root/constant.ts";
 
 const RenderedBlock = z.object({
 	id: z.string(),
@@ -11,8 +12,6 @@ const RenderedBlock = z.object({
 	html: z.string(),
 });
 
-export type TRenderedBlock = z.infer<typeof RenderedBlock>;
-
 const RenderedPage = z.object({
 	bg_url: z.string(),
 	width: z.int32().positive(),
@@ -20,28 +19,24 @@ const RenderedPage = z.object({
 	blocks: z.array(RenderedBlock),
 });
 
-export type TRenderedPage = z.infer<typeof RenderedPage>;
-
 const RenderedDocument = z.object({
 	id: z.string(),
 	pages: z.array(RenderedPage),
 });
 
+export type TRenderedBlock = z.infer<typeof RenderedBlock>;
+export type TRenderedPage = z.infer<typeof RenderedPage>;
 export type TRenderedDocument = z.infer<typeof RenderedDocument>;
 
 export const useQueryRenderedDocument = (
 	chatId: string,
-	enabled: boolean = false,
+	enabled: boolean = true,
 ) =>
 	useQuery({
 		queryKey: [chatId],
 		enabled: enabled,
 		queryFn: async () => {
-			const response = await fetch(`/api/chats/${chatId}/render`);
-			if (!response.ok) {
-				throw new Error("Network response was not ok");
-			}
-			const decoded = await response.json();
-			return await RenderedDocument.parseAsync(decoded);
+			const response = await axiosInstance.get(`/chats/${chatId}/render`);
+			return await RenderedDocument.parseAsync(response.data);
 		},
 	});

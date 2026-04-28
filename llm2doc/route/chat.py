@@ -12,7 +12,7 @@ from llm2doc.context.write import WriteContext
 from llm2doc.dependency import WithDB, WithThreadPool
 from llm2doc.entity import Chat
 from llm2doc.entity.message import MessageDepth
-from llm2doc.repository.chat import create_chat, load_chat_message_all, load_rendered_document
+from llm2doc.repository.chat import create_chat, list_chat, load_chat_message_all, load_rendered_document
 from llm2doc.repository.document import check_document_exists
 from llm2doc.repository.file import get_file_path
 from llm2doc.util import validate_type
@@ -25,6 +25,16 @@ class CreateChatRequest(BaseModel):
     target_doc: int
     source_docs: list[int]
     query: str
+
+
+class ChatListEntry(BaseModel):
+    chat_id: int
+    display_name: str
+    has_render: bool
+
+
+class ChatListResponse(BaseModel):
+    chats: list[ChatListEntry]
 
 
 class ChatMessageEntry(BaseModel):
@@ -70,6 +80,22 @@ async def create_chat_route(db: WithDB, thread_pool: WithThreadPool, body: Creat
     asyncio.create_task(create_document(ctx, body.query))
 
     return {"chat_id": chat_id}
+
+
+@router.get("")
+async def get_chat_list(db: WithDB):
+    chats: list[ChatListEntry] = []
+
+    async for now in list_chat(db):
+        chats.append(
+            ChatListEntry(
+                chat_id=now.chat_id,
+                display_name=now.display_name,
+                has_render=now.rendered_file_id is not None,
+            )
+        )
+
+    return ChatListResponse(chats=chats)
 
 
 @router.get("/{chat_id}")

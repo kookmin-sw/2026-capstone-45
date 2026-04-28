@@ -1,3 +1,28 @@
+@layer theme, base, components, utilities;
+
+@import "tailwindcss";
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme {
+	--color-primary: var(--color-blue-600);
+	--color-primary-foreground: var(--color-white);
+	--color-secondary: var(--color-slate-600);
+	--color-secondary-foreground: var(--color-white);
+	--color-muted: var(--color-slate-100);
+	--color-muted-foreground: var(--color-slate-600);
+	--color-accent: var(--color-slate-100);
+	--color-accent-foreground: var(--color-slate-900);
+	--color-destructive: var(--color-red-600);
+	--color-destructive-foreground: var(--color-white);
+	--color-border: var(--color-slate-200);
+	--color-input: var(--color-slate-200);
+	--color-ring: var(--color-blue-600);
+	--color-background: var(--color-white);
+	--color-foreground: var(--color-slate-950);
+}
+
 *,
 *::before,
 *::after {
@@ -26,6 +51,14 @@ dd {
 body {
 	min-height: 100vh;
 	line-height: 1.5;
+}
+
+button:hover {
+	cursor: pointer;
+}
+
+button:disabled:hover {
+	cursor: inherit;
 }
 
 img,
