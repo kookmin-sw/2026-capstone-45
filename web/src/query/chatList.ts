@@ -1,6 +1,6 @@
-import { axiosInstance } from "#root/constant.ts";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
+import { axiosInstance } from "#root/constant.ts";
 
 export const ChatListEntry = z.object({
 	display_name: z.string(),

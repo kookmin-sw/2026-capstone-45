@@ -1,6 +1,6 @@
-import { axiosInstance } from "#root/constant.ts";
 import { useMutation } from "@tanstack/react-query";
 import { z } from "zod";
+import { axiosInstance } from "#root/constant.ts";
 
 export const CreateChatRequest = z.object({
 	target_doc: z.int32(),

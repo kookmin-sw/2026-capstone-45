@@ -24,6 +24,10 @@ const RenderedDocument = z.object({
 	pages: z.array(RenderedPage),
 });
 
+export type TRenderedBlock = z.infer<typeof RenderedBlock>;
+export type TRenderedPage = z.infer<typeof RenderedPage>;
+export type TRenderedDocument = z.infer<typeof RenderedDocument>;
+
 export const useQueryRenderedDocument = (
 	chatId: string,
 	enabled: boolean = true,

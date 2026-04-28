@@ -1,6 +1,6 @@
-import { axiosInstance } from "#root/constant.ts";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
+import { axiosInstance } from "#root/constant.ts";
 
 export const ChatMessageEntry = z.object({
 	depth: z.int32(),
@@ -18,7 +18,7 @@ export const ChatDetailResponse = z.object({
 	messages: z.array(ChatMessageEntry),
 });
 
-const useQueryChatDetail = (chatId: number) =>
+export const useQueryChatDetail = (chatId: number) =>
 	useQuery({
 		queryKey: ["useQueryChatDetail", chatId],
 		queryFn: async () => {

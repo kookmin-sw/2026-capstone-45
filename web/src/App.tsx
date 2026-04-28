@@ -1,13 +1,11 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "#root/constant.ts";
-import NewChatPanel from "#root/layout/NewChatPanel.tsx";
+import { MainLayout } from "#root/layout/MainLayout.tsx";
 
-function App() {
+export const App = () => {
 	return (
 		<QueryClientProvider client={queryClient}>
-			<NewChatPanel />
+			<MainLayout />
 		</QueryClientProvider>
 	);
-}
-
-export default App;
+};
