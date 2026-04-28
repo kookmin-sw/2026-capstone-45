@@ -1,3 +1,4 @@
+import { Button } from "@mantine/core";
 import { FilePlus } from "lucide-react";
 
 interface EmptyDocumentListProps {
@@ -18,13 +19,16 @@ export const EmptyDocumentList = ({ onAddFile }: EmptyDocumentListProps) => {
 					지원되는 형식의 문서를 업로드한 후 시작해보세요
 				</p>
 			</div>
-			<button
-				type="button"
+			<Button
+				variant="filled"
+				color="blue"
+				size="md"
+				radius="md"
 				onClick={onAddFile}
-				className="mt-2 px-6 py-2.5 bg-primary text-primary-foreground rounded-lg font-semibold shadow-sm hover:opacity-90 transition-all active:scale-95"
+				className="mt-2"
 			>
 				파일 추가
-			</button>
+			</Button>
 		</div>
 	);
 };

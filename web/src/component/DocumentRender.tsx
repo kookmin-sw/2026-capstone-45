@@ -1,3 +1,4 @@
+import { ActionIcon } from "@mantine/core";
 import { useMemo, useState } from "react";
 import { useAppStore } from "#root/store/useAppStore";
 import {
@@ -92,20 +93,22 @@ function DocumentRender() {
 		<>
 			<div className="p-2 border-b border-border bg-background flex items-center gap-2">
 				<span className="text-sm font-medium ml-2">줌:&nbsp;</span>
-				<button
-					type="button"
+				<ActionIcon
+					variant="light"
+					color="gray"
+					size="sm"
 					onClick={() => setZoom((x) => Math.max(x - 25, 25))}
-					className="p-1 hover:bg-muted rounded"
 				>
 					-
-				</button>
-				<button
-					type="button"
+				</ActionIcon>
+				<ActionIcon
+					variant="light"
+					color="gray"
+					size="sm"
 					onClick={() => setZoom((x) => x + 25)}
-					className="p-1 hover:bg-muted rounded"
 				>
 					+
-				</button>
+				</ActionIcon>
 				<span className="text-sm text-muted-foreground">
 					&nbsp;{zoom / 1000}x
 				</span>

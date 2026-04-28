@@ -1,3 +1,4 @@
+import { notifications } from "@mantine/notifications";
 import { useState } from "react";
 import { ChatBox } from "#root/component/ChatBox";
 import { DocumentCard } from "#root/component/DocumentCard.tsx";
@@ -21,7 +22,7 @@ export const NewChatView = () => {
 
 	const handleCreateChat = async (query: string) => {
 		if (!isDocValid) {
-			alert("문서를 선택해주세요.");
+			// UI상 어짜피 막혀있음
 			return;
 		}
 		try {
@@ -32,7 +33,12 @@ export const NewChatView = () => {
 			});
 			setActiveChat(chatId.toString());
 		} catch (error) {
-			console.error("Failed to create chat", error);
+			console.error(error);
+			notifications.show({
+				title: "오류",
+				message: "채팅을 생성하는데 실패했습니다",
+				color: "red",
+			});
 		}
 	};
 
@@ -78,9 +84,8 @@ export const NewChatView = () => {
 									}
 									buttons={[
 										{
-											className: isTarget
-												? "bg-white/90 hover:bg-white"
-												: "bg-primary/90 hover:bg-primary text-white",
+											variant: isTarget ? "light" : "filled",
+											color: "blue",
 											text: isTarget ? "선택 취소" : "타겟 문서로 선택",
 											action: (docId: number) => {
 												if (!isTarget) {
@@ -94,7 +99,8 @@ export const NewChatView = () => {
 											},
 										},
 										{
-											className: "bg-white/90 hover:bg-white",
+											variant: isSource ? "light" : "filled",
+											color: "gray",
 											text: isSource ? "선택 취소" : "소스 문서로 선택",
 											action: (docId: number) => {
 												if (!isSource) {

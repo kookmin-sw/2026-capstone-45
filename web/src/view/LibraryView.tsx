@@ -45,12 +45,14 @@ export const LibraryView = () => {
 								onOpen={() => {}}
 								buttons={[
 									{
-										className: "bg-white",
+										variant: "light",
+										color: "blue",
 										text: "이름 바꾸기",
 										action: onRename,
 									},
 									{
-										className: "bg-destructive text-white",
+										variant: "filled",
+										color: "red",
 										text: "삭제",
 										action: onDelete,
 									},

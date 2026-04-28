@@ -1,3 +1,9 @@
+import {
+	ActionIcon,
+	Button,
+	type ButtonVariant,
+	type DefaultMantineColor,
+} from "@mantine/core";
 import { Maximize2 } from "lucide-react";
 import { useState } from "react";
 import type { Document } from "#root/query/documentList";
@@ -5,8 +11,9 @@ import { cn } from "../utils/cn";
 import { Badge } from "./Badge";
 
 export interface DocumentCardButton {
-	className: string;
 	text: string;
+	variant: ButtonVariant;
+	color: DefaultMantineColor;
 	action: (docId: number) => unknown;
 }
 
@@ -60,24 +67,25 @@ export const DocumentCard = ({
 			{/* Hover Overlay */}
 			{hovered && (
 				<div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-3 animate-in fade-in duration-200 z-10">
-					<button
-						type="button"
-						onClick={onOpen}
-						className="absolute top-2 right-2 p-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-white transition-colors"
-					>
-						<Maximize2 className="w-5 h-5" />
-					</button>
+					<div className="absolute top-2 right-2">
+						<ActionIcon variant="subtle" color="white" onClick={onOpen}>
+							<Maximize2 size={20} />
+						</ActionIcon>
+					</div>
 
 					{buttons?.map((btn, i) => (
-						<button
+						<Button
 							// biome-ignore lint/suspicious/noArrayIndexKey: won't change
 							key={i}
-							type="button"
-							onClick={() => btn.action(doc.doc_id)}
-							className={`px-4 py-2 text-foreground rounded-lg font-semibold transition-colors ${btn.className}`}
+							onClick={(e) => {
+								e.stopPropagation();
+								btn.action(doc.doc_id);
+							}}
+							variant={btn.variant}
+							color={btn.color}
 						>
 							{btn.text}
-						</button>
+						</Button>
 					))}
 				</div>
 			)}

@@ -1,3 +1,4 @@
+import { Button } from "@mantine/core";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 
@@ -16,18 +17,28 @@ export const FoldableMessage = ({
 
 	return (
 		<div className="w-full mb-2">
-			<button
-				type="button"
+			<Button
+				variant="subtle"
+				color="gray"
+				fullWidth
+				justify="flex-start"
 				onClick={() => setIsOpen(!isOpen)}
-				className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-muted/50 transition-colors font-medium text-muted-foreground w-full text-left"
+				leftSection={
+					isOpen ? (
+						<ChevronDown className="w-4 h-4" />
+					) : (
+						<ChevronRight className="w-4 h-4" />
+					)
+				}
+				styles={{
+					label: {
+						fontWeight: 500,
+						color: "var(--muted-foreground)",
+					},
+				}}
 			>
-				{isOpen ? (
-					<ChevronDown className="w-4 h-4" />
-				) : (
-					<ChevronRight className="w-4 h-4" />
-				)}
-				<span>{title}</span>
-			</button>
+				{title}
+			</Button>
 			{isOpen && <div className="mt-1 ml-6 space-y-2">{children}</div>}
 		</div>
 	);
