@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChatBox } from "#root/component/ChatBox";
 import { DocumentCard } from "#root/component/DocumentCard.tsx";
+import { DocumentCardList } from "#root/component/DocumentCardList.tsx";
 import { EmptyDocumentList } from "#root/component/EmptyDocumentList.tsx";
 import { useMutateCreateChat } from "#root/query/createChat";
 import { type Document, useQueryDocumentList } from "#root/query/documentList";
@@ -35,6 +36,17 @@ export const NewChatView = () => {
 		}
 	};
 
+	const selections: { id: number; kind: "source" | "target" }[] =
+		sourceDocs.map((docId) => ({ id: docId, kind: "target" }));
+	if (targetDoc !== null) {
+		selections.push({ id: targetDoc, kind: "source" });
+	}
+
+	const removeSelection = (docId: number) => {
+		if (targetDoc === docId) setTargetDoc(null);
+		setSourceDocs((prev) => prev.filter((id) => id !== docId));
+	};
+
 	if (docs.length === 0) {
 		return (
 			<div className="flex-1 p-8">
@@ -47,48 +59,59 @@ export const NewChatView = () => {
 		<div className="flex-1 flex flex-col overflow-hidden">
 			<div className="flex-1 p-8 overflow-y-auto">
 				<div className="max-w-5xl mx-auto">
-					<h1 className="text-3xl font-bold text-foreground mb-8">
+					<h1 className="text-3xl font-bold text-foreground pb-8">
 						새 채팅 시작
 					</h1>
 
-					<div className="mb-8">
-						<h2 className="text-lg font-semibold mb-4">문서 선택</h2>
-						<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-							{docs.map((doc) => (
+					<DocumentCardList>
+						{docs.map((doc) => {
+							const isTarget = targetDoc === doc.doc_id;
+							const isSource = sourceDocs.includes(doc.doc_id);
+
+							return (
 								<DocumentCard
 									key={doc.doc_id}
 									document={doc}
-									mode="select"
 									onOpen={() => {}}
 									selectionState={
-										targetDoc === doc.doc_id
-											? "target"
-											: sourceDocs.includes(doc.doc_id)
-												? "source"
-												: "none"
+										isTarget ? "target" : isSource ? "source" : undefined
 									}
-									onSetTarget={() => {
-										setTargetDoc(doc.doc_id);
-										setSourceDocs((prev) =>
-											prev.filter((id) => id !== doc.doc_id),
-										);
-									}}
-									onAddSource={() => {
-										setSourceDocs((prev) => [
-											...new Set([...prev, doc.doc_id]),
-										]);
-										if (targetDoc === doc.doc_id) setTargetDoc(null);
-									}}
-									onRemoveSelection={() => {
-										if (targetDoc === doc.doc_id) setTargetDoc(null);
-										setSourceDocs((prev) =>
-											prev.filter((id) => id !== doc.doc_id),
-										);
-									}}
+									buttons={[
+										{
+											className: isTarget
+												? "bg-white/90 hover:bg-white"
+												: "bg-primary/90 hover:bg-primary text-white",
+											text: isTarget ? "선택 취소" : "타겟 문서로 선택",
+											action: (docId: number) => {
+												if (!isTarget) {
+													setTargetDoc(docId);
+													setSourceDocs((prev) =>
+														prev.filter((id) => id !== docId),
+													);
+												} else {
+													removeSelection(docId);
+												}
+											},
+										},
+										{
+											className: "bg-white/90 hover:bg-white",
+											text: isSource ? "선택 취소" : "소스 문서로 선택",
+											action: (docId: number) => {
+												if (!isSource) {
+													setSourceDocs((prev) => [
+														...new Set([...prev, docId]),
+													]);
+													if (targetDoc === docId) setTargetDoc(null);
+												} else {
+													removeSelection(docId);
+												}
+											},
+										},
+									]}
 								/>
-							))}
-						</div>
-					</div>
+							);
+						})}
+					</DocumentCardList>
 				</div>
 			</div>
 
