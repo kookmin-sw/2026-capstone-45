@@ -1,4 +1,4 @@
-import type { Document } from "#root/types";
+import type { Document } from "#root/query/documentList";
 import { DocumentCard } from "./DocumentCard";
 
 interface ContextPanelProps {
@@ -40,7 +40,7 @@ export const ContextPanel = ({
 					<div className="space-y-4">
 						{sources.map((doc) => (
 							<DocumentCard
-								key={doc.id}
+								key={doc.doc_id}
 								document={doc}
 								mode="context"
 								onOpen={() => onOpenDocument(doc)}

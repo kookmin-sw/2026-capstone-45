@@ -1,8 +1,7 @@
 import { ChevronLeft, Library, Menu, Plus } from "lucide-react";
 import { ChatHistoryItem } from "#root/component/ChatHistoryItem";
-import { useQueryChatList } from "#root/query/chatList";
+import { type Chat, useQueryChatList } from "#root/query/chatList";
 import { useAppStore } from "#root/store/useAppStore";
-import type { Chat } from "#root/types";
 
 export const LeftAside = () => {
 	const {
@@ -16,14 +15,7 @@ export const LeftAside = () => {
 
 	const { data } = useQueryChatList();
 
-	const chats: Chat[] =
-		data?.chats.map((chat) => ({
-			id: chat.chat_id.toString(),
-			title: chat.display_name,
-			updatedAt: new Date(),
-			isPinned: false,
-			hasRender: chat.has_render,
-		})) ?? [];
+	const chats: Chat[] = data?.chats ?? [];
 
 	return (
 		<aside
@@ -94,10 +86,12 @@ export const LeftAside = () => {
 					<div className="space-y-1">
 						{chats.map((chat) => (
 							<ChatHistoryItem
-								key={chat.id}
+								key={chat.chat_id}
 								chat={chat}
-								active={activeChatId === chat.id}
-								onSelect={() => setActiveChat(chat.id, chat.hasRender)}
+								active={activeChatId === chat.chat_id.toString()}
+								onSelect={() =>
+									setActiveChat(chat.chat_id.toString(), chat.has_render)
+								}
 								onPin={() => {}} // TODO
 								onRename={() => {}} // TODO
 								onDelete={() => {}} // TODO

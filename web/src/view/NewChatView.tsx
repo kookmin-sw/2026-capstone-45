@@ -3,29 +3,20 @@ import { ChatBox } from "#root/component/ChatBox";
 import { DocumentCard } from "#root/component/DocumentCard.tsx";
 import { EmptyDocumentList } from "#root/component/EmptyDocumentList.tsx";
 import { useMutateCreateChat } from "#root/query/createChat";
-import { useQueryDocumentList } from "#root/query/documentList";
+import { type Document, useQueryDocumentList } from "#root/query/documentList";
 import { useAppStore } from "#root/store/useAppStore";
-import type { Document } from "#root/types";
 
 export const NewChatView = () => {
 	const { data } = useQueryDocumentList();
 	const { mutateAsync: createChat } = useMutateCreateChat();
 	const { setActiveChat } = useAppStore();
 
-	const [targetDoc, setTargetDoc] = useState<string | null>(null);
-	const [sourceDocs, setSourceDocs] = useState<string[]>([]);
+	const [targetDoc, setTargetDoc] = useState<number | null>(null);
+	const [sourceDocs, setSourceDocs] = useState<number[]>([]);
 
 	const isDocValid = targetDoc !== null && sourceDocs.length !== 0;
 
-	const docs: Document[] =
-		data?.docs.map((doc) => ({
-			id: doc.doc_id.toString(),
-			filename: doc.display_name,
-			uploadedAt: new Date(),
-			sizeBytes: 0,
-			thumbnailUrl: "",
-			src: "",
-		})) ?? [];
+	const docs: Document[] = data?.docs ?? [];
 
 	const handleCreateChat = async (query: string) => {
 		if (!isDocValid) {
@@ -34,8 +25,8 @@ export const NewChatView = () => {
 		}
 		try {
 			const chatId = await createChat({
-				target_doc: Number(targetDoc),
-				source_docs: sourceDocs.map(Number),
+				target_doc: targetDoc,
+				source_docs: sourceDocs,
 				query,
 			});
 			setActiveChat(chatId.toString());
@@ -65,28 +56,34 @@ export const NewChatView = () => {
 						<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
 							{docs.map((doc) => (
 								<DocumentCard
-									key={doc.id}
+									key={doc.doc_id}
 									document={doc}
 									mode="select"
 									onOpen={() => {}}
 									selectionState={
-										targetDoc === doc.id
+										targetDoc === doc.doc_id
 											? "target"
-											: sourceDocs.includes(doc.id)
+											: sourceDocs.includes(doc.doc_id)
 												? "source"
 												: "none"
 									}
 									onSetTarget={() => {
-										setTargetDoc(doc.id);
-										setSourceDocs((prev) => prev.filter((id) => id !== doc.id));
+										setTargetDoc(doc.doc_id);
+										setSourceDocs((prev) =>
+											prev.filter((id) => id !== doc.doc_id),
+										);
 									}}
 									onAddSource={() => {
-										setSourceDocs((prev) => [...new Set([...prev, doc.id])]);
-										if (targetDoc === doc.id) setTargetDoc(null);
+										setSourceDocs((prev) => [
+											...new Set([...prev, doc.doc_id]),
+										]);
+										if (targetDoc === doc.doc_id) setTargetDoc(null);
 									}}
 									onRemoveSelection={() => {
-										if (targetDoc === doc.id) setTargetDoc(null);
-										setSourceDocs((prev) => prev.filter((id) => id !== doc.id));
+										if (targetDoc === doc.doc_id) setTargetDoc(null);
+										setSourceDocs((prev) =>
+											prev.filter((id) => id !== doc.doc_id),
+										);
 									}}
 								/>
 							))}

@@ -1,20 +1,11 @@
 import { DocumentCard } from "#root/component/DocumentCard.tsx";
 import { EmptyDocumentList } from "#root/component/EmptyDocumentList.tsx";
-import { useQueryDocumentList } from "#root/query/documentList";
-import type { Document } from "#root/types";
+import { type Document, useQueryDocumentList } from "#root/query/documentList";
 
 export const LibraryView = () => {
 	const { data } = useQueryDocumentList();
 
-	const docs: Document[] =
-		data?.docs.map((doc) => ({
-			id: doc.doc_id.toString(),
-			filename: doc.display_name,
-			uploadedAt: new Date(),
-			sizeBytes: 0,
-			thumbnailUrl: "",
-			src: "",
-		})) ?? [];
+	const docs: Document[] = data?.docs ?? [];
 
 	if (docs.length === 0) {
 		return (
@@ -35,7 +26,7 @@ export const LibraryView = () => {
 				<div className="grid grid-cols-1 gap-4">
 					{docs.map((doc) => (
 						<DocumentCard
-							key={doc.id}
+							key={doc.doc_id}
 							document={doc}
 							mode="library"
 							onOpen={() => {}}

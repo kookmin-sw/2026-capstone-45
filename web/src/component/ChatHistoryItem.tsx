@@ -1,5 +1,6 @@
 import { MessageSquare } from "lucide-react";
-import type { Chat, MenuItem } from "#root/types";
+import type { Chat } from "#root/query/chatList";
+import type { MenuItem } from "#root/types";
 import { ThreeDotMenu } from "./ThreeDotMenu";
 
 interface ChatHistoryItemProps {
@@ -20,7 +21,7 @@ export const ChatHistoryItem = ({
 	onDelete,
 }: ChatHistoryItemProps) => {
 	const menuItems: MenuItem[] = [
-		{ label: chat.isPinned ? "고정해제" : "고정", onSelect: onPin },
+		{ label: "고정", onSelect: onPin },
 		{ label: "이름 바꾸기", onSelect: onRename },
 		{ label: "삭제", onSelect: onDelete, variant: "danger" },
 	];
@@ -37,7 +38,9 @@ export const ChatHistoryItem = ({
 			<MessageSquare
 				className={`w-4 h-4 shrink-0 ${active ? "text-primary" : "text-muted-foreground/60"}`}
 			/>
-			<span className="text-sm font-medium truncate flex-1">{chat.title}</span>
+			<span className="text-sm font-medium truncate flex-1">
+				{chat.display_name}
+			</span>
 			<div
 				className={`opacity-0 group-hover:opacity-100 transition-opacity ${active ? "opacity-100" : ""}`}
 			>

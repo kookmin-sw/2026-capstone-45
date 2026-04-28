@@ -1,8 +1,8 @@
 import { Maximize2 } from "lucide-react";
 import { useState } from "react";
-import type { Document, MenuItem } from "#root/types";
+import type { Document } from "#root/query/documentList";
+import type { MenuItem } from "#root/types";
 import { Badge } from "./Badge";
-import { FileMetadata } from "./FileMetadata";
 import { ThreeDotMenu } from "./ThreeDotMenu";
 
 interface DocumentCardProps {
@@ -49,11 +49,12 @@ export const DocumentCard = ({
 				onClick={onOpen}
 			>
 				<div className="flex-1 min-w-0">
-					<FileMetadata
-						filename={doc.filename}
-						uploadedAt={doc.uploadedAt}
-						sizeBytes={doc.sizeBytes}
-					/>
+					<div className="font-medium text-foreground truncate">
+						{doc.display_name}
+					</div>
+					<div className="text-xs text-muted-foreground mt-1">
+						ID: {doc.doc_id} • Pages: {doc.pages_cnt}
+					</div>
 				</div>
 				<ThreeDotMenu items={menuItems} />
 			</button>
@@ -80,17 +81,16 @@ export const DocumentCard = ({
 					onClick={onOpen}
 				/>
 
-				{/* Thumbnail */}
-				<div className="h-[80%] w-full bg-muted pointer-events-none">
-					<img
-						src={doc.thumbnailUrl || undefined}
-						className="w-full h-full object-cover"
-					/>
+				{/* Thumbnail Placeholder */}
+				<div className="h-[80%] w-full bg-muted pointer-events-none flex items-center justify-center text-muted-foreground">
+					No Preview
 				</div>
 
 				{/* Footer */}
 				<div className="h-[20%] w-full flex items-center px-3 bg-background border-t border-border pointer-events-none">
-					<span className="text-sm font-medium truncate">{doc.filename}</span>
+					<span className="text-sm font-medium truncate">
+						{doc.display_name}
+					</span>
 				</div>
 
 				{/* Selection Badge */}
@@ -173,15 +173,14 @@ export const DocumentCard = ({
 	return (
 		<button
 			type="button"
-			className="relative aspect-[3/4] bg-background border border-border rounded-lg overflow-hidden group cursor-pointer transition-all hover:border-primary/50 shadow-sm w-full p-0"
+			className="relative aspect-[3/4] bg-background border border-border rounded-lg overflow-hidden group cursor-pointer transition-all hover:border-primary/50 shadow-sm w-full p-0 flex items-center justify-center"
 			onMouseEnter={() => setHovered(true)}
 			onMouseLeave={() => setHovered(false)}
 			onClick={onOpen}
 		>
-			<img
-				src={doc.thumbnailUrl || undefined}
-				className="w-full h-full object-cover"
-			/>
+			<div className="text-xs text-muted-foreground p-2 text-center">
+				{doc.display_name}
+			</div>
 			{hovered && (
 				<div className="absolute inset-0 bg-black/40 flex items-center justify-center animate-in fade-in duration-200">
 					<Maximize2 className="w-8 h-8 text-white opacity-80" />

@@ -8,6 +8,8 @@ export const ChatListEntry = z.object({
 	has_render: z.boolean(),
 });
 
+export type Chat = z.infer<typeof ChatListEntry>;
+
 export const ChatListResponse = z.object({
 	chats: z.array(ChatListEntry),
 });
