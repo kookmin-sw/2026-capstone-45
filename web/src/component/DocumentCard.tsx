@@ -80,10 +80,13 @@ export const DocumentCard = ({
 					onClick={onOpen}
 				/>
 
-				{/* Thumbnail Placeholder */}
-				<div className="h-[80%] w-full bg-muted pointer-events-none flex items-center justify-center text-muted-foreground">
-					No Preview
-				</div>
+				{/* Thumbnail */}
+				<div
+					className="h-[80%] w-full bg-no-repeat bg-cover"
+					style={{
+						backgroundImage: `url(/api/documents/${doc.doc_id}/image/0)`,
+					}}
+				/>
 
 				{/* Footer */}
 				<div className="h-[20%] w-full flex items-center px-3 bg-background border-t border-border pointer-events-none">
