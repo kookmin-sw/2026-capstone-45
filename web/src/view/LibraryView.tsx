@@ -1,11 +1,15 @@
+import { Button, FileButton } from "@mantine/core";
+import { Plus } from "lucide-react";
 import { useState } from "react";
 import { DocumentCard } from "#root/component/DocumentCard.tsx";
 import { DocumentCardList } from "#root/component/DocumentCardList.tsx";
 import { EmptyDocumentList } from "#root/component/EmptyDocumentList.tsx";
+import { useMutateCreateDocument } from "#root/query/createDocument";
 import { type Document, useQueryDocumentList } from "#root/query/documentList";
 
 export const LibraryView = () => {
 	const { data } = useQueryDocumentList();
+	const { mutate } = useMutateCreateDocument();
 	const [_focusedDoc, setFocusedDoc] = useState<number | null>(null);
 
 	const docs: Document[] = data?.docs ?? [];
@@ -20,10 +24,18 @@ export const LibraryView = () => {
 		//TODO: Show modal
 	};
 
+	const handleUpload = (file: File | null) => {
+		if (file) {
+			mutate(file);
+		}
+	};
+
 	if (docs.length === 0) {
 		return (
 			<div className="flex-1 p-8">
-				<EmptyDocumentList onAddFile={() => {}} />
+				<FileButton onChange={handleUpload} accept="application/pdf,text/plain">
+					{(props) => <EmptyDocumentList onAddFile={props.onClick} />}
+				</FileButton>
 			</div>
 		);
 	}
@@ -35,6 +47,21 @@ export const LibraryView = () => {
 					<h1 className="text-3xl font-bold text-foreground">
 						문서 라이브러리
 					</h1>
+					<FileButton
+						onChange={handleUpload}
+						accept="application/pdf,text/plain"
+					>
+						{(props) => (
+							<Button
+								{...props}
+								leftSection={<Plus size={18} />}
+								variant="filled"
+								color="blue"
+							>
+								파일 업로드
+							</Button>
+						)}
+					</FileButton>
 				</div>
 				<DocumentCardList>
 					{docs.map((doc) => {
