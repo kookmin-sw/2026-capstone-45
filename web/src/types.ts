@@ -12,6 +12,7 @@ export interface Chat {
 	title: string;
 	updatedAt: Date;
 	isPinned: boolean;
+	hasRender: boolean;
 }
 
 export type AppView = "LIBRARY" | "NEW_CHAT" | "CHAT" | "CHAT_AND_ARTIFACT";

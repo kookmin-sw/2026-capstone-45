@@ -3,8 +3,9 @@ import { z } from "zod";
 import { axiosInstance } from "#root/constant.ts";
 
 export const ChatListEntry = z.object({
+	chat_id: z.int32(),
 	display_name: z.string(),
-	has_render: z.string(),
+	has_render: z.boolean(),
 });
 
 export const ChatListResponse = z.object({
@@ -16,7 +17,7 @@ export const useQueryChatList = () =>
 		queryKey: ["useQueryChatList"],
 		queryFn: async () => {
 			const result = await axiosInstance.get("/chats");
-			const data = await ChatListResponse.parseAsync(result);
+			const data = await ChatListResponse.parseAsync(result.data);
 			return data;
 		},
 	});

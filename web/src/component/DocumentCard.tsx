@@ -7,6 +7,7 @@ import { ThreeDotMenu } from "./ThreeDotMenu";
 
 interface DocumentCardProps {
 	document: Document;
+	// TODO: discriminated union
 	mode: "library" | "select" | "context";
 	onOpen: () => void;
 	// mode="library"

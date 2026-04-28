@@ -5,7 +5,7 @@ interface ChatBoxProps {
 	onSubmit: (message: string) => void;
 	onStop: () => void;
 	isStreaming: boolean;
-	locked?: boolean;
+	disabled?: boolean;
 	placeholder?: string;
 }
 
@@ -13,7 +13,8 @@ export const ChatBox = ({
 	onSubmit,
 	onStop,
 	isStreaming,
-	locked = false,
+	disabled = false,
+	placeholder,
 }: ChatBoxProps) => {
 	const [value, setValue] = useState("");
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -34,14 +35,14 @@ export const ChatBox = ({
 	};
 
 	const handleSend = () => {
-		if (value.trim() && !locked && !isStreaming) {
+		if (value.trim() && !disabled && !isStreaming) {
 			onSubmit(value.trim());
 			setValue("");
 		}
 	};
-
+	s;
 	return (
-		<div className="w-full bg-background border-t border-border p-4">
+		<div className="w-full bg-background p-4">
 			<div className="max-w-4xl mx-auto relative flex items-end gap-2 bg-muted/50 rounded-2xl border border-border focus-within:border-primary/50 transition-colors p-2 px-3">
 				<textarea
 					ref={textareaRef}
@@ -49,7 +50,8 @@ export const ChatBox = ({
 					value={value}
 					onChange={(e) => setValue(e.target.value)}
 					onKeyDown={handleKeyDown}
-					disabled={locked}
+					disabled={disabled}
+					placeholder={placeholder}
 					className="flex-1 bg-transparent border-none focus:ring-0 resize-none py-2 text-sm max-h-[30vh] disabled:opacity-50"
 				/>
 				<div className="flex items-center pb-1">
@@ -65,7 +67,7 @@ export const ChatBox = ({
 						<button
 							type="button"
 							onClick={handleSend}
-							disabled={locked || !value.trim()}
+							disabled={disabled || !value.trim()}
 							className="p-2 bg-primary text-primary-foreground rounded-xl disabled:bg-muted-foreground/30 disabled:text-muted-foreground transition-all active:scale-95"
 						>
 							<Send className="w-4 h-4" />

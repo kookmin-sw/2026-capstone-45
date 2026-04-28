@@ -22,7 +22,7 @@ export const useQueryChatDetail = (chatId: number) =>
 	useQuery({
 		queryKey: ["useQueryChatDetail", chatId],
 		queryFn: async () => {
-			const result = await axiosInstance.get(`/${chatId}`);
+			const result = await axiosInstance.get(`/chats/${chatId}`);
 			const data = await ChatDetailResponse.parseAsync(result.data);
 			return data;
 		},

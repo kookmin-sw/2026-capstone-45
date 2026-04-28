@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useAppStore } from "#root/store/useAppStore";
 import {
 	type TRenderedPage,
 	useQueryRenderedDocument,
@@ -73,8 +74,11 @@ const renderPages = (pages: TRenderedPage[], zoom: number) => {
 
 function DocumentRender() {
 	const [zoom, setZoom] = useState(500);
-	const [chatId, setChatId] = useState("");
-	const doc = useQueryRenderedDocument(chatId, chatId !== "");
+	const { activeChatId } = useAppStore();
+	const doc = useQueryRenderedDocument(
+		activeChatId ?? "",
+		activeChatId !== null,
+	);
 
 	const renderedPages = useMemo(() => {
 		if (!doc.isSuccess) {
@@ -86,29 +90,27 @@ function DocumentRender() {
 
 	return (
 		<>
-			<div>
-				<span>채팅 ID: </span>
-				<input
-					style={{ border: "1px solid #000" }}
-					value={chatId}
-					onChange={(e) => setChatId(e.target.value)}
-				/>
-				<span style={{ marginLeft: "1rem" }}>줌:&nbsp;</span>
+			<div className="p-2 border-b border-border bg-background flex items-center gap-2">
+				<span className="text-sm font-medium ml-2">줌:&nbsp;</span>
 				<button
 					type="button"
 					onClick={() => setZoom((x) => Math.max(x - 25, 25))}
+					className="p-1 hover:bg-muted rounded"
 				>
 					-
 				</button>
-				<button type="button" onClick={() => setZoom((x) => x + 25)}>
+				<button
+					type="button"
+					onClick={() => setZoom((x) => x + 25)}
+					className="p-1 hover:bg-muted rounded"
+				>
 					+
 				</button>
-				<span>&nbsp;{zoom / 1000}x</span>
+				<span className="text-sm text-muted-foreground">
+					&nbsp;{zoom / 1000}x
+				</span>
 			</div>
-			<div
-				className="printable"
-				style={{ backgroundColor: "#ddd", padding: "1px" }}
-			>
+			<div className="printable flex-1 overflow-auto bg-muted p-4">
 				{renderedPages}
 			</div>
 		</>

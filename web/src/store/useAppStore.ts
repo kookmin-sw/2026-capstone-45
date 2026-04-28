@@ -8,7 +8,7 @@ interface AppState {
 	setView: (view: AppView) => void;
 	setSidebarFolded: (folded: boolean) => void;
 	toggleSidebar: () => void;
-	setActiveChat: (chatId: string | null) => void;
+	setActiveChat: (chatId: string | null, hasRender?: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -24,5 +24,9 @@ export const useAppStore = create<AppState>((set) => ({
 	setSidebarFolded: (sidebarFolded) => set({ sidebarFolded }),
 	toggleSidebar: () =>
 		set((state) => ({ sidebarFolded: !state.sidebarFolded })),
-	setActiveChat: (activeChatId) => set({ activeChatId, view: "CHAT" }),
+	setActiveChat: (activeChatId, hasRender) =>
+		set({
+			activeChatId,
+			view: hasRender ? "CHAT_AND_ARTIFACT" : "CHAT",
+		}),
 }));

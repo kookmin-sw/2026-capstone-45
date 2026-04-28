@@ -1,4 +1,3 @@
-import { ContextPanel } from "#root/component/ContextPanel";
 import { GhostOverlay } from "#root/component/GhostOverlay";
 import { useAppStore } from "#root/store/useAppStore";
 import { ArtifactView } from "#root/view/ArtifactView";
