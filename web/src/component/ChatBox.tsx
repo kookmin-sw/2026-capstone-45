@@ -40,7 +40,7 @@ export const ChatBox = ({
 			setValue("");
 		}
 	};
-	s;
+
 	return (
 		<div className="w-full bg-background p-4">
 			<div className="max-w-4xl mx-auto relative flex items-end gap-2 bg-muted/50 rounded-2xl border border-border focus-within:border-primary/50 transition-colors p-2 px-3">

@@ -26,10 +26,9 @@ export const ChatHistoryItem = ({
 	];
 
 	return (
-		<button
-			type="button"
+		<div
 			onClick={onSelect}
-			className={`group relative flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors w-full text-left ${
+			className={`group relative flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors w-full text-left hover:cursor-pointer ${
 				active
 					? "bg-primary/10 text-primary"
 					: "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -44,6 +43,6 @@ export const ChatHistoryItem = ({
 			>
 				<ThreeDotMenu items={menuItems} />
 			</div>
-		</button>
+		</div>
 	);
 };

@@ -83,8 +83,7 @@ export const DocumentCard = ({
 				{/* Thumbnail */}
 				<div className="h-[80%] w-full bg-muted pointer-events-none">
 					<img
-						src={doc.thumbnailUrl}
-						alt={doc.filename}
+						src={doc.thumbnailUrl || undefined}
 						className="w-full h-full object-cover"
 					/>
 				</div>
@@ -180,8 +179,7 @@ export const DocumentCard = ({
 			onClick={onOpen}
 		>
 			<img
-				src={doc.thumbnailUrl}
-				alt={doc.filename}
+				src={doc.thumbnailUrl || undefined}
 				className="w-full h-full object-cover"
 			/>
 			{hovered && (
