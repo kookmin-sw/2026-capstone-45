@@ -43,8 +43,7 @@ export const DocumentCard = ({
 		];
 
 		return (
-			<button
-				type="button"
+			<div
 				className="group flex items-center justify-between p-4 bg-background border border-border rounded-lg hover:border-primary/50 hover:bg-muted/30 transition-all cursor-pointer w-full text-left"
 				onClick={onOpen}
 			>
@@ -57,14 +56,14 @@ export const DocumentCard = ({
 					</div>
 				</div>
 				<ThreeDotMenu items={menuItems} />
-			</button>
+			</div>
 		);
 	}
 
 	if (mode === "select") {
 		return (
 			<div
-				className={`relative aspect-[3/4] bg-background border-2 rounded-xl overflow-hidden transition-all group ${
+				className={`relative aspect-3/4 bg-background border-2 rounded-xl overflow-hidden transition-all group ${
 					selectionState === "target"
 						? "border-primary shadow-md"
 						: selectionState === "source"
@@ -173,7 +172,7 @@ export const DocumentCard = ({
 	return (
 		<button
 			type="button"
-			className="relative aspect-[3/4] bg-background border border-border rounded-lg overflow-hidden group cursor-pointer transition-all hover:border-primary/50 shadow-sm w-full p-0 flex items-center justify-center"
+			className="relative aspect-3/4 bg-background border border-border rounded-lg overflow-hidden group cursor-pointer transition-all hover:border-primary/50 shadow-sm w-full p-0 flex items-center justify-center"
 			onMouseEnter={() => setHovered(true)}
 			onMouseLeave={() => setHovered(false)}
 			onClick={onOpen}

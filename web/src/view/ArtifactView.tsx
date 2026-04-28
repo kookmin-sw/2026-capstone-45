@@ -19,12 +19,9 @@ export const ArtifactView = () => {
 			{/* Left Half: Chat */}
 			<div className="w-1/2 flex flex-col border-r border-border relative">
 				<div className="flex-1 overflow-y-auto p-6 space-y-4">
-					{data?.messages.map((msg) => (
-						<ChatMessage
-							key={msg.depth}
-							role={msg.depth % 2 === 0 ? "user" : "agent"}
-							content={msg.content}
-						/>
+					{data?.messages.map((msg, i) => (
+						// biome-ignore lint/suspicious/noArrayIndexKey: TODO: message_id를 API에서 받아오기
+						<ChatMessage key={i} role="user" content={msg.content} />
 					))}
 				</div>
 				<ChatBox onSubmit={() => {}} onStop={() => {}} isStreaming={false} />

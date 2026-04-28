@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { z } from "zod";
-import { axiosInstance } from "#root/constant.ts";
+import { axiosInstance, queryClient } from "#root/constant.ts";
 
 export const CreateChatRequest = z.object({
 	target_doc: z.int32(),
@@ -18,5 +18,9 @@ export const useMutateCreateChat = () =>
 			const result = await axiosInstance.post("/chats", param);
 			const data = await CreateChatResponse.parseAsync(result.data);
 			return data.chat_id;
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["useQueryChatList"] });
+			queryClient.invalidateQueries({ queryKey: ["useQueryChatDetail"] });
 		},
 	});

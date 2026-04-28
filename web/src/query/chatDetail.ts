@@ -26,4 +26,5 @@ export const useQueryChatDetail = (chatId: number) =>
 			const data = await ChatDetailResponse.parseAsync(result.data);
 			return data;
 		},
+		refetchInterval: 5000,
 	});
