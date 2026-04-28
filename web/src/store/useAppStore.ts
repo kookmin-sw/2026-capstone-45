@@ -11,6 +11,7 @@ interface AppState {
 	setActiveChat: (chatId: string | null, hasRender?: boolean) => void;
 }
 
+//TODO: 리렌더링 최적화
 export const useAppStore = create<AppState>((set) => ({
 	view: "NEW_CHAT",
 	sidebarFolded: false,
