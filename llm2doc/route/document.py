@@ -93,7 +93,7 @@ async def create_document(file: Annotated[UploadFile, File()], db: WithDB):
 async def rebuild_artifact(doc_id: int, db: WithDB):
     from llm2doc.artifact.run import build_artifact
 
-    await clear_artifacts(db, doc_id)
+    await clear_artifacts(db, doc_id, None)
 
     engine = validate_type(db.bind, AsyncEngine)
     await build_artifact(engine, [doc_id])

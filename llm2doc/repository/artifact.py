@@ -42,6 +42,12 @@ async def save_artifact(db: AsyncSession, doc_id: int, artifact_name: str, artif
     )
 
 
-async def clear_artifacts(db: AsyncSession, doc_id: int):
-    stmt = delete(Artifact).where(Artifact.doc_id == doc_id)
+async def clear_artifacts(db: AsyncSession, doc_id: int | None, names: list[str] | None):
+    stmt = delete(Artifact)
+
+    if doc_id is not None:
+        stmt = stmt.where(Artifact.doc_id == doc_id)
+    if names is not None:
+        stmt = stmt.where(Artifact.artifact_name.in_(names))
+
     await db.execute(stmt)
