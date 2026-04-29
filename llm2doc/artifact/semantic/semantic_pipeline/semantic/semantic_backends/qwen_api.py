@@ -11,8 +11,8 @@ class QwenAPIBackend:
 
     def __init__(self):
         self.client = OpenAI(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            base_url=os.getenv("OPENAI_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+            api_key=os.getenv("OPENAI_LITE_API_KEY"),
+            base_url=os.getenv("OPENAI_LITE_BASE_URL"),
         )
 
     @staticmethod

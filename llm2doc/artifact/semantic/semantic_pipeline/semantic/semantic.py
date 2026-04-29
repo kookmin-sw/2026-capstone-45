@@ -196,7 +196,7 @@ def apply_financial_semantic_overlay(
             tasks.append((block, payload, fallback_decision))
 
         if tasks:
-            max_workers = 10
+            max_workers = 50
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_block = {
                     executor.submit(
