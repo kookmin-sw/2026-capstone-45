@@ -1,5 +1,7 @@
+import os
 import gc
 import json
+import logging
 import paddle
 import numpy as np
 
@@ -27,10 +29,19 @@ class OCRArtifactPipeline(ArtifactPipeline[OCRArtifact]):
     def __init__(self, ctx: PipelineContext):
         super().__init__(ctx)
 
+        vl_rec_backend = None
+        vl_rec_server_url = os.getenv("PADDLEOCR_VL_REC_SERVER_URL")
+
+        if vl_rec_server_url is not None:
+            logging.info(f"Using vLLM backend at {vl_rec_server_url}")
+            vl_rec_backend = "vllm-server"
+
         self.ocr = PaddleOCRVL(
             use_layout_detection=True,
             merge_layout_blocks=True,
             layout_nms=True,
+            vl_rec_backend=vl_rec_backend,
+            vl_rec_server_url=vl_rec_server_url,
         )
 
     def process(self, document: DocumentContext) -> OCRArtifact:

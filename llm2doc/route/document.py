@@ -84,7 +84,7 @@ async def create_document(file: Annotated[UploadFile, File()], db: WithDB):
     await db.flush()
 
     doc_id = validate_type(await doc.awaitable_attrs.doc_id, int)
-    await asyncio.create_task(create_document_worker(db.bind, doc_id, file_id, file_type, True))
+    asyncio.create_task(create_document_worker(db.bind, doc_id, file_id, file_type, True))
 
     return {"id": doc_id}
 
