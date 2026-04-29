@@ -1,0 +1,46 @@
+services:
+  web:
+    build: .
+    ports:
+      - "5000:80"
+    shm_size: 64g
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    depends_on:
+      paddleocr-vlm-server:
+        condition: service_healthy
+    environment:
+      - OPENAI_BASE_URL=https://openrouter.ai/api/v1
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=qwen/qwen3.5-plus-02-15
+      - OPENAI_LITE_BASE_URL=https://openrouter.ai/api/v1
+      - OPENAI_LITE_API_KEY=${OPENAI_LITE_API_KEY}
+      - OPENAI_LITE_MODEL=openai/gpt-oss-20b
+      - OPENAI_EMBED_BASE_URL=https://openrouter.ai/api/v1
+      - OPENAI_EMBED_API_KEY=${OPENAI_EMBED_API_KEY}
+      - OPENAI_EMBED_MODEL=qwen/qwen3-embedding-8b
+      - PADDLEOCR_VL_REC_SERVER_URL=http://paddleocr-vlm-server:8080/v1
+      - PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+      - FLAGS_fraction_of_gpu_memory_to_use=0.8
+
+  paddleocr-vlm-server:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    shm_size: 64g
+    user: root
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      start_period: 300s
