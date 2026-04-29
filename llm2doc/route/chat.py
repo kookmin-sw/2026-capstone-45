@@ -1,7 +1,9 @@
 import asyncio
+import json
+import logging
 
 from uuid import UUID
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -9,16 +11,49 @@ from pydantic import BaseModel
 
 from llm2doc.context.pipeline import PipelineContext
 from llm2doc.context.write import WriteContext
+from llm2doc.debug_trace import GenerationTracer, read_chat_logs, resolve_chat_log_file
 from llm2doc.dependency import WithDB, WithThreadPool
 from llm2doc.entity import Chat
 from llm2doc.entity.message import MessageDepth
-from llm2doc.repository.chat import create_chat, list_chat, load_chat_message_all, load_rendered_document
+from llm2doc.repository.chat import (
+    append_chat_message,
+    create_chat,
+    list_chat,
+    load_chat_message_all,
+    load_rendered_document,
+)
 from llm2doc.repository.document import check_document_exists, is_all_documents_completed
 from llm2doc.repository.file import get_file_path
 from llm2doc.util import validate_type
 
 
 router = APIRouter(prefix="/chats")
+
+
+async def _run_create_document(ctx: WriteContext, query: str):
+    from llm2doc.create_document import create_document
+
+    try:
+        await create_document(ctx, query)
+    except Exception as exc:
+        logging.exception("Failed to create document for chat_id=%s", ctx.chat_id)
+        if ctx.tracer is not None:
+            ctx.tracer.update_summary(status="failed", error_type=type(exc).__name__, error=str(exc))
+        async with ctx.pipeline_ctx.with_db() as db:
+            await append_chat_message(
+                db,
+                ctx.chat_id,
+                MessageDepth.TRACE,
+                json.dumps(
+                    {
+                        "type": "run_failed",
+                        "component": "create_document",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
 
 
 class CreateChatRequest(BaseModel):
@@ -56,8 +91,6 @@ class ChatDetailResponse(BaseModel):
 
 @router.post("")
 async def create_chat_route(db: WithDB, thread_pool: WithThreadPool, body: CreateChatRequest):
-    from llm2doc.create_document import create_document
-
     all_exists = await check_document_exists(db, [body.target_doc, *body.source_docs])
     if not all_exists:
         raise HTTPException(404, "document not found")
@@ -69,6 +102,8 @@ async def create_chat_route(db: WithDB, thread_pool: WithThreadPool, body: Creat
     display_name = body.query.strip()[:32].strip()
 
     chat_id = await create_chat(db, display_name, target_doc=body.target_doc, source_docs=body.source_docs)
+    tracer = GenerationTracer.for_chat(chat_id)
+    tracer.update_summary(status="created", chat_id=chat_id, query=body.query)
 
     pipeline_ctx = PipelineContext(
         loop=asyncio.get_running_loop(),
@@ -80,11 +115,30 @@ async def create_chat_route(db: WithDB, thread_pool: WithThreadPool, body: Creat
         chat_id=chat_id,
         target_doc_id=body.target_doc,
         source_doc_ids=body.source_docs,
+        tracer=tracer,
     )
 
-    asyncio.create_task(create_document(ctx, body.query))
+    asyncio.create_task(_run_create_document(ctx, body.query))
 
     return {"chat_id": chat_id}
+
+
+@router.get("/{chat_id}/logs")
+async def get_chat_logs(chat_id: int):
+    return read_chat_logs(chat_id)
+
+
+@router.get("/{chat_id}/logs/file")
+async def get_chat_log_file(chat_id: int, path: str = Query(..., min_length=1)):
+    try:
+        file_path = resolve_chat_log_file(chat_id, path)
+    except ValueError:
+        raise HTTPException(400, "invalid log path")
+    except FileNotFoundError:
+        raise HTTPException(404, "log file not found")
+
+    media_type = "application/json" if file_path.suffix == ".json" else "text/plain"
+    return FileResponse(file_path, media_type=media_type)
 
 
 @router.get("")

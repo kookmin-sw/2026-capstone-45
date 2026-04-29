@@ -1,7 +1,7 @@
 import { FileText } from "lucide-react";
 import { ChatBox } from "#root/component/ChatBox";
 import DocumentRender from "#root/component/DocumentRender";
-import { MessageList } from "#root/component/MessageList";
+import { GenerationLogPanel } from "#root/component/GenerationLogPanel";
 import { useQueryChatDetail } from "#root/query/chatDetail";
 import { useAppStore } from "#root/store/useAppStore";
 
@@ -19,7 +19,12 @@ export const ChatView = () => {
 			{/* Left Half: Chat */}
 			<div className="w-1/2 flex flex-col border-r border-border relative">
 				<div className="flex-1 overflow-y-auto p-6">
-					{isReady && <MessageList messages={data?.messages || []} />}
+					{isReady && (
+						<GenerationLogPanel
+							chatId={Number(activeChatId)}
+							messages={data?.messages || []}
+						/>
+					)}
 				</div>
 				<ChatBox onSubmit={() => {}} onStop={() => {}} isStreaming={false} />
 			</div>

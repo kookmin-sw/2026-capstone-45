@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 
 from threading import Thread
@@ -104,10 +105,25 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
                         artifacts[i][pipeline.ARTIFACT_NAME] = loaded
                         existing_artifacts[i].add(pipeline.ARTIFACT_NAME)
 
-        thread = Thread(target=_build_artifact_inner, args=(pipeline_ctx, doc_ids, file_paths, artifacts))
+        build_errors: list[BaseException] = []
+
+        def run_inner():
+            try:
+                _build_artifact_inner(pipeline_ctx, doc_ids, file_paths, artifacts)
+            except BaseException as exc:
+                logging.exception("Failed to build artifacts")
+                build_errors.append(exc)
+
+        thread = Thread(target=run_inner)
         thread.start()
 
         await join_thread_async(thread)
+
+        if build_errors:
+            async with pipeline_ctx.with_db() as db:
+                for doc_id in doc_ids:
+                    await _update_log_status(db, doc_id, DocumentStatus.ERROR, repr(build_errors[0]))
+            raise build_errors[0]
 
         async with pipeline_ctx.with_db() as db:
             for i, doc_id in enumerate(doc_ids):
@@ -117,7 +133,7 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
                         await save_artifact(db, doc_id, name, value)
 
         async with pipeline_ctx.with_db() as db:
-            for doc_id in doc_ids:
+            for i, doc_id in enumerate(doc_ids):
                 if len(artifacts[i]) == len(PIPELINES):
                     await _update_log_status(db, doc_id, DocumentStatus.COMPLETED, "Completed artifact build.")
                 else:

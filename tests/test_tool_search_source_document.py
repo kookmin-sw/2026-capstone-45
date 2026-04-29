@@ -2,10 +2,15 @@ import json
 import shutil
 import unittest
 import uuid
+import asyncio
 from pathlib import Path
 
 from llm2doc.bm25_search import BM25Document, LocalBM25SearchClient
-from llm2doc.create_document import normalize_analysis_payload
+from llm2doc.create_document import (
+    normalize_analysis_payload,
+    sanitize_unsupported_blocks,
+    validate_unsupported_blocks,
+)
 from llm2doc.debug_trace import DecisionTracer
 from llm2doc.tool_search_source_document import (
     SearchRecord,
@@ -29,7 +34,7 @@ class FakeResponses:
     def __init__(self, responses: list[FakeResponse]) -> None:
         self._responses = list(responses)
 
-    def create(self, **_: object) -> FakeResponse:
+    async def create(self, **_: object) -> FakeResponse:
         if not self._responses:
             raise AssertionError("No fake responses left")
         return self._responses.pop(0)
@@ -71,9 +76,10 @@ def make_record(
     section_purpose: str | None = None,
     role_confidence: float = 0.0,
 ) -> SearchRecord:
+    doc_ids = {"financial2": 1, "financial3": 2, "news1": 1}
     return SearchRecord(
         record_id=record_id,
-        document=document,
+        doc_id=doc_ids.get(document, 1),
         page=page,
         display_block_id=block_id,
         embedding_text=text,
@@ -197,7 +203,7 @@ class ToolSearchSourceDocumentTests(unittest.TestCase):
                 collection_override=collection,
             )
 
-            output = tool.invoke_raw("KMW 재무 정보")
+            output = asyncio.run(tool.invoke_raw("KMW 재무 정보"))
 
             self.assertIn("First-stage candidate bundle:", output)
             self.assertIn("Candidate #1:", output)
@@ -230,7 +236,7 @@ class ToolSearchSourceDocumentTests(unittest.TestCase):
                 collection_override=collection,
             )
 
-            output = tool.invoke_raw("KMW 재무 정보")
+            output = asyncio.run(tool.invoke_raw("KMW 재무 정보"))
 
             self.assertIn("First-stage candidate bundle:", output)
             self.assertIn("Candidate #1:", output)
@@ -267,7 +273,7 @@ class ToolSearchSourceDocumentTests(unittest.TestCase):
                 collection_override=collection,
             )
 
-            output = tool.invoke_raw("KMW 재무 정보")
+            output = asyncio.run(tool.invoke_raw("KMW 재무 정보"))
 
             self.assertIn("First-stage candidate bundle:", output)
             events = self.read_event_names(tmpdir)
@@ -320,7 +326,7 @@ class ToolSearchSourceDocumentTests(unittest.TestCase):
                 collection_override=collection,
             )
 
-            output = tool.invoke_raw("트럼프 미국 대통령 정책")
+            output = asyncio.run(tool.invoke_raw("트럼프 미국 대통령 정책"))
 
             self.assertIn("Candidate #1: record_id=semantic:news1:block-strong", output)
 
@@ -396,7 +402,7 @@ class ToolSearchSourceDocumentTests(unittest.TestCase):
                 collection_override=collection,
             )
 
-            tool.invoke_raw("트럼프 정책")
+            asyncio.run(tool.invoke_raw("트럼프 정책"))
 
             search_log = next((tmpdir / "trace").glob("*/search/first_stage.jsonl"))
             with search_log.open("rt", encoding="utf-8") as f:
@@ -445,7 +451,7 @@ class ToolSearchSourceDocumentTests(unittest.TestCase):
                 collection_override=collection,
             )
 
-            tool.invoke_raw("트럼프")
+            asyncio.run(tool.invoke_raw("트럼프"))
 
             search_log = next((tmpdir / "trace").glob("*/search/first_stage.jsonl"))
             with search_log.open("rt", encoding="utf-8") as f:
@@ -486,6 +492,109 @@ class ToolSearchSourceDocumentTests(unittest.TestCase):
 
         self.assertEqual(normalized["evidence"][0]["matched_via"], ["entity"])
         self.assertEqual(normalized["evidence"][1]["matched_via"], ["semantic", "bm25", "entity"])
+
+    def test_normalize_analysis_payload_parses_unsupported_blocks(self) -> None:
+        normalized = normalize_analysis_payload(
+            {
+                "unsupported_blocks": [
+                    {
+                        "block_id": "target-page-1-block-11",
+                        "support_status": "partially_supported",
+                        "reason": "future columns are missing",
+                        "required_action": "empty_cells",
+                        "unsupported_selectors": {"columns": ["2026F"]},
+                    },
+                    {
+                        "block_id": "not-a-block",
+                        "required_action": "empty_table_values",
+                    },
+                    {
+                        "block_id": "output-page-2-block-3",
+                        "support_status": "bad",
+                        "required_action": "bad",
+                    },
+                ]
+            },
+            query="테스트",
+            source_doc_ids=["1"],
+        )
+
+        self.assertEqual(len(normalized["unsupported_blocks"]), 2)
+        self.assertEqual(normalized["unsupported_blocks"][0]["block_id"], "output-page-1-block-11")
+        self.assertEqual(normalized["unsupported_blocks"][0]["required_action"], "empty_cells")
+        self.assertEqual(normalized["unsupported_blocks"][0]["unsupported_selectors"]["columns"], ["2026F"])
+        self.assertEqual(normalized["unsupported_blocks"][1]["support_status"], "unsupported")
+        self.assertEqual(normalized["unsupported_blocks"][1]["required_action"], "empty_block")
+
+    def test_validate_unsupported_blocks_detects_blocked_paragraph_text(self) -> None:
+        html = (
+            '<document id="output"><page id="output-page-1">'
+            '<div id="output-page-1-block-1"><p>가상 전망 50%</p></div>'
+            "</page></document>"
+        )
+
+        violations = validate_unsupported_blocks(
+            html,
+            [
+                {
+                    "block_id": "output-page-1-block-1",
+                    "required_action": "empty_paragraph",
+                    "reason": "unsupported paragraph",
+                }
+            ],
+        )
+
+        self.assertEqual(len(violations), 1)
+        self.assertEqual(violations[0]["block_id"], "output-page-1-block-1")
+
+    def test_sanitize_unsupported_table_values_preserves_headers_and_labels(self) -> None:
+        html = (
+            '<document id="output"><page id="output-page-1">'
+            '<div id="output-page-1-block-1">'
+            "<table>"
+            "<tr><td>지표</td><td>2025P</td><td>2026F</td></tr>"
+            "<tr><td>PER</td><td>10.7</td><td>5.8</td></tr>"
+            "<tr><td>PBR</td><td>1.9</td><td>2.0</td></tr>"
+            "</table>"
+            "</div></page></document>"
+        )
+        rule = {
+            "block_id": "output-page-1-block-1",
+            "required_action": "empty_table_values",
+            "reason": "valuation metrics unsupported",
+        }
+
+        self.assertTrue(validate_unsupported_blocks(html, [rule]))
+        sanitized = sanitize_unsupported_blocks(html, [rule])
+        self.assertFalse(validate_unsupported_blocks(sanitized, [rule]))
+        self.assertIn("<td>PER</td><td>-</td><td>-</td>", sanitized)
+        self.assertIn("<td>PBR</td><td>-</td><td>-</td>", sanitized)
+        self.assertIn("<td>지표</td><td>2025P</td><td>2026F</td>", sanitized)
+
+    def test_empty_cells_only_blocks_selected_future_column(self) -> None:
+        html = (
+            '<document id="output"><page id="output-page-1">'
+            '<div id="output-page-1-block-1">'
+            "<table>"
+            "<tr><td>구분</td><td>3/23</td><td>3/24F</td></tr>"
+            "<tr><td>상황</td><td>공격 유예</td><td>협상 계속</td></tr>"
+            "<tr><td>확률</td><td>-</td><td>50~70%</td></tr>"
+            "</table>"
+            "</div></page></document>"
+        )
+        rule = {
+            "block_id": "output-page-1-block-1",
+            "required_action": "empty_cells",
+            "reason": "future column unsupported",
+            "unsupported_selectors": {"columns": ["3/24F"]},
+        }
+
+        violations = validate_unsupported_blocks(html, [rule])
+        self.assertEqual(len(violations), 1)
+        sanitized = sanitize_unsupported_blocks(html, [rule])
+        self.assertFalse(validate_unsupported_blocks(sanitized, [rule]))
+        self.assertIn("<td>공격 유예</td><td>-</td>", sanitized)
+        self.assertIn("<td>-</td><td>-</td>", sanitized)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from llm2doc.create_document import create_document
 from llm2doc.context.pipeline import PipelineContext
 from llm2doc.context.write import WriteContext
+from llm2doc.debug_trace import GenerationTracer
 from llm2doc.repository.chat import create_chat
 from llm2doc.save_chat import save_chat_messages
 from llm2doc.server import lifespan
@@ -60,11 +61,15 @@ async def main():
             async with db.begin():
                 chat_id = await create_chat(db, timestamp, target_doc, source_docs)
 
+        tracer = GenerationTracer(f"debug_{timestamp}", run_id=f"chat-{chat_id}")
+        tracer.update_summary(status="created", chat_id=chat_id, query=query)
+
         ctx = WriteContext(
             pipeline_ctx=pipeline_ctx,
             chat_id=chat_id,
             target_doc_id=target_doc,
             source_doc_ids=source_docs,
+            tracer=tracer,
         )
 
         try:

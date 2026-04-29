@@ -5,19 +5,33 @@
 """
 
 import json
+import re
 
-from typing import Sequence
+from typing import Any, Sequence
 from openai.types.responses.response_input_param import FunctionCallOutput
 
 from llm2doc.artifact.ocr import OCRArtifact
+from llm2doc.context.write import WriteContext
+
+
+def _safe_name(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_.-]+", "_", value).strip("_") or "call"
 
 
 class ToolFetchSourceDocument:
-    def __init__(self, docs: Sequence[OCRArtifact]):
+    def __init__(
+        self,
+        docs: Sequence[OCRArtifact],
+        *,
+        ctx: WriteContext | None = None,
+        source_doc_infos: Sequence[dict[str, Any]] | None = None,
+    ):
         """미리 파싱해 둔 문서를 문서 ID 기준으로 조회 가능하게 준비한다."""
         super().__init__()
 
         self.docs = docs
+        self.ctx = ctx
+        self.source_doc_infos = list(source_doc_infos or [])
 
         self.description = {
             "type": "function",
@@ -76,6 +90,20 @@ class ToolFetchSourceDocument:
 
         page = doc.pages[page_id - 1]
         page_html = page.to_structured_html()
+        info = self.source_doc_infos[doc_idx] if doc_idx < len(self.source_doc_infos) else {}
+        fetch_payload = {
+            "tool_document_id": doc_idx + 1,
+            "actual_doc_id": info.get("doc_id"),
+            "display_name": info.get("display_name"),
+            "page_id": page_id,
+            "block_count": len(page.blocks),
+            "call_id": call_id,
+        }
+        if self.ctx is not None and self.ctx.tracer is not None:
+            safe_call_id = _safe_name(call_id)
+            self.ctx.tracer.write_json(f"retrieval/fetch_{safe_call_id}.json", {**fetch_payload, "html": page_html})
+            self.ctx.tracer.write_text(f"retrieval/fetch_{safe_call_id}.html", page_html)
+            self.ctx.tracer.event("retrieval", "source_page_fetched", fetch_payload)
 
         return {
             "type": "function_call_output",

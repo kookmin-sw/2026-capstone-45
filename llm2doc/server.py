@@ -4,12 +4,16 @@ from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, APIRouter
 from fastapi.responses import FileResponse, PlainTextResponse
+from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from llm2doc.entity import init_schema
 from llm2doc.route.chat import router as chat
 from llm2doc.route.document import router as document
 from llm2doc.route.font import router as font
+
+
+load_dotenv(override=True)
 
 
 @asynccontextmanager

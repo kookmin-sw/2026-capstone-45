@@ -6,6 +6,7 @@ import numpy as np
 from typing import Any
 from paddleocr import PaddleOCRVL
 from paddlex.inference.pipelines.paddleocr_vl.result import PaddleOCRVLResult, PaddleOCRVLBlock
+from tqdm import tqdm
 
 from llm2doc.artifact.ocr._artifact import OCRArtifact, OCRPage, OCRBlock
 from llm2doc.artifact.base import ArtifactPipeline
@@ -39,15 +40,23 @@ class OCRArtifactPipeline(ArtifactPipeline[OCRArtifact]):
             img_arr = np.asarray(img)[..., ::-1].copy()
             pages.append(img_arr)
 
-        pages_output = self.ocr.predict(pages)
+        pages_output = []
+        for i, page in enumerate(tqdm(pages, desc=f"OCR doc_id={document.doc_id}", unit="page"), start=1):
+            tqdm.write(f"[ocr] predict doc_id={document.doc_id}, page={i}/{len(pages)}")
+            page_output = self.ocr.predict([page])
+            pages_output.extend(page_output)
+            tqdm.write(f"[ocr] done doc_id={document.doc_id}, page={i}/{len(pages)}")
+
         assert len(pages_output) == len(pages)
 
+        tqdm.write(f"[ocr] restructure doc_id={document.doc_id}, pages={len(pages_output)}")
         pages_output = self.ocr.restructure_pages(
             pages_output,
             merge_tables=False,
             relevel_titles=True,
             concatenate_pages=False,
         )
+        tqdm.write(f"[ocr] restructure done doc_id={document.doc_id}")
         pages_output = validate_type(pages_output, list[PaddleOCRVLResult])
         assert len(pages_output) == len(document.images)
 
@@ -59,7 +68,7 @@ class OCRArtifactPipeline(ArtifactPipeline[OCRArtifact]):
 
         parsed_pages = []
 
-        for i, output in enumerate(pages_output):
+        for i, output in enumerate(tqdm(pages_output, desc=f"OCR parse doc_id={document.doc_id}", unit="page")):
             as_json = json.dumps(output.json, ensure_ascii=False)
             as_markdown: Any = output.markdown
 

@@ -93,4 +93,4 @@ async def is_all_documents_completed(db: AsyncSession, doc_ids: list[int]) -> bo
     )
 
     result = await db.execute(stmt)
-    return len(result.all()) == 0
+    return result.scalar_one() == 0

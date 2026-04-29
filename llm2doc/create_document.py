@@ -2,6 +2,7 @@ import os
 import re
 import json
 import asyncio
+import time
 
 from pathlib import Path
 from pydantic import BaseModel
@@ -22,7 +23,7 @@ from llm2doc.entity.message import MessageDepth
 from llm2doc.render_image import render_document, render_page, RenderedPage
 from llm2doc.tool_fetch_source_document import ToolFetchSourceDocument
 from llm2doc.tool_search_source_document import ToolSearchSourceDocument
-from llm2doc.repository.document import load_document_image_all
+from llm2doc.repository.document import load_document, load_document_image_all
 from llm2doc.repository.file import get_file_path
 from llm2doc.repository.chat import save_rendered_document
 
@@ -407,9 +408,7 @@ async def maybe_generate_analysis(
         ],
     )
     await ctx.append_log("analysis_response", response.model_dump_json())
-
-    # TODO
-    return
+    ctx.trace_file("llm/analysis_response.json", response_to_jsonable(response))
     await ctx.append_log(
         "llm/analysis_response.json", file=json.dumps(response_to_jsonable(response), ensure_ascii=False, indent=2)
     )
@@ -417,8 +416,9 @@ async def maybe_generate_analysis(
     analysis = normalize_analysis_payload(
         extract_json_object(extract_response_text(response)),
         query=query,
-        source_doc_ids=source_doc_ids,
+        source_doc_ids=[str(x) for x in ctx.source_doc_ids],
     )
+    ctx.trace_file("output/generation_notes.json", analysis)
     await ctx.append_log("analysis.json", file=json.dumps(analysis, ensure_ascii=False, indent=2))
     await ctx.append_trace(
         {
@@ -454,13 +454,17 @@ async def request_final_document(
             model=os.environ["OPENAI_MODEL"],
             input=final_input,
         )
+        response_payload = response_to_jsonable(response)
+        ctx.trace_file(f"llm/final_document_response_attempt_{attempt:03d}.json", response_payload)
+        ctx.trace_file("llm/final_document_response.json", response_payload)
         await ctx.append_log(
             "llm/final_document_response.json",
-            file=json.dumps(response_to_jsonable(response), ensure_ascii=False, indent=2),
+            file=json.dumps(response_payload, ensure_ascii=False, indent=2),
         )
 
         output_text = extract_response_text(response)
         last_output_text = output_text
+        ctx.trace_file("output/final_document_response.html", output_text)
         await ctx.append_log("write_output", file=output_text)
 
         extracted_document = extract_document_block(output_text)
@@ -499,6 +503,7 @@ async def write_document(
     target_doc: OCRArtifact,
     *,
     semantic_artifacts: Sequence[SemanticArtifact | None] | None = None,
+    source_doc_infos: Sequence[dict[str, Any]] | None = None,
     component: str,
 ) -> str:
     """LLM과 도구 호출 루프를 돌며 최종 문서 블록을 생성한다."""
@@ -511,7 +516,7 @@ async def write_document(
 
     # 모델이 사용할 수 있는 도구는 "원문 검색"과 "특정 페이지 조회" 두 종류다.
     tools: list[Any] = [
-        ToolFetchSourceDocument(src_docs),
+        ToolFetchSourceDocument(src_docs, ctx=ctx, source_doc_infos=source_doc_infos),
         ToolSearchSourceDocument(
             src_docs,
             client=client,
@@ -530,8 +535,11 @@ async def write_document(
             ],
         }
     ]
+    loop_idx = 0
 
     while True:
+        loop_idx += 1
+        ctx.trace_file(f"llm/tool_loop_request_{loop_idx:03d}.json", input)
         await ctx.append_log("llm_api_response", json.dumps(input, ensure_ascii=False, indent=2))
 
         response = await client.responses.create(
@@ -541,6 +549,7 @@ async def write_document(
             tool_choice="auto",
         )
 
+        ctx.trace_file(f"llm/tool_loop_response_{loop_idx:03d}.json", response_to_jsonable(response))
         await ctx.append_log("llm_api_response", response.model_dump_json())
 
         for item in response.output:
@@ -578,17 +587,18 @@ async def write_document(
 
             fulfiled_tool_calls.add(tool_call.call_id)
 
+            tool_started = time.perf_counter()
             if found:
                 result = await tool.invoke(tool_call.arguments, tool_call.call_id)
                 input.append(result)
             else:
-                input.append(
-                    {
-                        "type": "function_call_output",
-                        "output": "Error: No such tool found.",
-                        "call_id": tool_call.call_id,
-                    }
-                )
+                result = {
+                    "type": "function_call_output",
+                    "output": "Error: No such tool found.",
+                    "call_id": tool_call.call_id,
+                }
+                input.append(result)
+            tool_duration_ms = (time.perf_counter() - tool_started) * 1000
 
             await ctx.append_message(
                 MessageDepth.TOOL_CALL,
@@ -601,6 +611,7 @@ async def write_document(
                     "component": component,
                     "tool": tool_call.name,
                     "call_id": tool_call.call_id,
+                    "duration_ms": tool_duration_ms,
                     "output_preview": str(result.get("output", ""))[:500],
                 }
             )
@@ -635,12 +646,43 @@ async def create_document(
     query: str | None,
 ):
     """문서 생성부터 결과 이미지 렌더링까지 전체 작업을 수행한다."""
+    run_started = time.perf_counter()
     if query is None:
         query = "소스 문서 내용을 기반으로 작성해줘."
 
     from llm2doc.entity.message import MessageDepth
 
     await ctx.append_message(MessageDepth.USER, query, is_markdown=True)
+
+    async with ctx.pipeline_ctx.with_db() as db:
+        target_doc_entity = await load_document(db, ctx.target_doc_id)
+        source_doc_entities = [await load_document(db, doc_id) for doc_id in ctx.source_doc_ids]
+
+        target_doc_info = {
+            "doc_id": target_doc_entity.doc_id,
+            "display_name": target_doc_entity.display_name,
+        }
+        source_doc_infos = [
+            {
+                "tool_document_id": index,
+                "doc_id": doc.doc_id,
+                "display_name": doc.display_name,
+            }
+            for index, doc in enumerate(source_doc_entities, start=1)
+        ]
+
+    if ctx.tracer is not None:
+        ctx.tracer.update_summary(
+            status="running",
+            chat_id=ctx.chat_id,
+            query=query,
+            started_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            target_doc_id=target_doc_info["doc_id"],
+            target_display_name=target_doc_info["display_name"],
+            target_doc=target_doc_info,
+            source_documents=source_doc_infos,
+            source_docs=source_doc_infos,
+        )
 
     # output_dir_name = RESULT_OUTPUT_DIR_NAME or f"{'_'.join(src_docs)}_{target_doc}"
     # output_dir = os.path.join(RESULT_OUTPUT_ROOT, output_dir_name)
@@ -652,6 +694,8 @@ async def create_document(
             "type": "run_started",
             "component": "create_document",
             "query": query,
+            "target_doc": target_doc_info,
+            "source_docs": source_doc_infos,
         }
     )
 
@@ -664,24 +708,31 @@ async def create_document(
     #     semantic_artifacts_root,
     # )
 
-    await build_artifact(ctx.pipeline_ctx.engine, [ctx.target_doc_id, *ctx.source_doc_ids])
+    async with ctx.trace_step(
+        "artifact",
+        "artifact",
+        {"document_ids": [ctx.target_doc_id, *ctx.source_doc_ids], "target_doc": target_doc_info},
+    ):
+        await build_artifact(ctx.pipeline_ctx.engine, [ctx.target_doc_id, *ctx.source_doc_ids])
 
     src_docs_parsed: list[OCRArtifact] = []
     src_sem_artifacts: list[SemanticArtifact] = []
 
-    for src_doc in ctx.source_doc_ids:
-        ocr = await get_or_build_artifact(ctx.pipeline_ctx.engine, src_doc, OCRArtifactPipeline)
-        src_docs_parsed.append(ocr)
+    async with ctx.trace_step("create_document", "load_source", {"source_docs": source_doc_infos}):
+        for src_doc in ctx.source_doc_ids:
+            ocr = await get_or_build_artifact(ctx.pipeline_ctx.engine, src_doc, OCRArtifactPipeline)
+            src_docs_parsed.append(ocr)
 
-        sem = await get_or_build_artifact(ctx.pipeline_ctx.engine, src_doc, SemanticArtifactPipeline)
-        src_sem_artifacts.append(sem)
+            sem = await get_or_build_artifact(ctx.pipeline_ctx.engine, src_doc, SemanticArtifactPipeline)
+            src_sem_artifacts.append(sem)
 
-    target_doc_parsed: OCRArtifact = await get_or_build_artifact(
-        ctx.pipeline_ctx.engine, ctx.target_doc_id, OCRArtifactPipeline
-    )
-    target_doc_style: StyleArtifact = await get_or_build_artifact(
-        ctx.pipeline_ctx.engine, ctx.target_doc_id, StyleArtifactPipeline
-    )
+    async with ctx.trace_step("create_document", "load_target", {"target_doc": target_doc_info}):
+        target_doc_parsed: OCRArtifact = await get_or_build_artifact(
+            ctx.pipeline_ctx.engine, ctx.target_doc_id, OCRArtifactPipeline
+        )
+        target_doc_style: StyleArtifact = await get_or_build_artifact(
+            ctx.pipeline_ctx.engine, ctx.target_doc_id, StyleArtifactPipeline
+        )
 
     async with ctx.pipeline_ctx.with_db() as db:
         file_entities = await load_document_image_all(db, ctx.target_doc_id)
@@ -693,15 +744,17 @@ async def create_document(
     # 문서 생성 자체는 Responses API를 쓰는 LLM 호출 루프에서 처리한다.
     client = AsyncOpenAI(base_url=os.environ["OPENAI_BASE_URL"], api_key=os.environ["OPENAI_API_KEY"])
 
-    imagine = await write_document(
-        ctx,
-        client,
-        query,
-        src_docs_parsed,
-        target_doc_parsed,
-        semantic_artifacts=src_sem_artifacts,
-        component="create_document",
-    )
+    async with ctx.trace_step("llm", "llm_tool_loop", {"target_doc": target_doc_info, "source_docs": source_doc_infos}):
+        imagine = await write_document(
+            ctx,
+            client,
+            query,
+            src_docs_parsed,
+            target_doc_parsed,
+            semantic_artifacts=src_sem_artifacts,
+            source_doc_infos=source_doc_infos,
+            component="create_document",
+        )
 
     # 작성한 문서를 렌더링함
     htmls = [[cast(str | None, None) for _ in x.blocks] for x in target_doc_parsed.pages]
@@ -736,8 +789,10 @@ async def create_document(
             "type": "render_started",
             "component": "create_document",
             "page_count": len(target_doc_images),
+            "target_doc": target_doc_info,
         }
     )
+    render_started = time.perf_counter()
 
     def finalize_render():
         rendered_pages: list[RenderedPage] = []
@@ -748,6 +803,34 @@ async def create_document(
         return render_document(rendered_pages)
 
     rendered_doc = await asyncio.to_thread(finalize_render)
+    rendered_payload = json.loads(rendered_doc.model_dump_json())
+    ctx.trace_file("output/final_render.json", rendered_payload)
+    await ctx.append_trace(
+        {
+            "type": "render_completed",
+            "component": "create_document",
+            "page_count": len(target_doc_images),
+            "duration_ms": (time.perf_counter() - render_started) * 1000,
+            "target_doc": target_doc_info,
+        }
+    )
 
     async with ctx.pipeline_ctx.with_db() as db:
         await save_rendered_document(db, ctx.chat_id, rendered_doc.model_dump_json())
+
+    total_duration_ms = (time.perf_counter() - run_started) * 1000
+    if ctx.tracer is not None:
+        ctx.tracer.update_summary(
+            status="completed",
+            completed_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            total_duration_ms=total_duration_ms,
+        )
+    await ctx.append_trace(
+        {
+            "type": "run_completed",
+            "component": "create_document",
+            "duration_ms": total_duration_ms,
+            "target_doc": target_doc_info,
+            "source_docs": source_doc_infos,
+        }
+    )

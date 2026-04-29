@@ -24,6 +24,7 @@ from llm2doc.artifact.ocr import OCRArtifact
 from llm2doc.artifact.semantic import SemanticArtifact
 from llm2doc.bm25_search import BM25Document, BM25SearchClient, LocalBM25SearchClient
 from llm2doc.context.write import WriteContext
+from llm2doc.debug_trace import GenerationTracer
 
 
 COLLECTION_NAME = "docs_v2_semantic"
@@ -610,7 +611,8 @@ class ToolSearchSourceDocument:
         self,
         src_docs: Sequence[OCRArtifact],
         client: AsyncOpenAI,
-        ctx: WriteContext,
+        ctx: WriteContext | None = None,
+        tracer: GenerationTracer | None = None,
         bm25_client: BM25SearchClient | None = None,
         *,
         semantic_artifacts: Sequence[SemanticArtifact | None] | None = None,
@@ -624,6 +626,7 @@ class ToolSearchSourceDocument:
         self.client = client
         self.records_by_id: dict[str, SearchRecord] = {}
         self.ctx = ctx
+        self.tracer = tracer
         self.collection: Any = collection_override
         self.chroma: Any = None
         self._snapshot_counter = 0
@@ -704,11 +707,18 @@ class ToolSearchSourceDocument:
         return {"type": "function_call_output", "output": output, "call_id": call_id}
 
     def _trace_event(self, event: str, payload: dict[str, Any]) -> None:
-        self.ctx.append_trace_sync({"type": event, "component": "search.first_stage", **payload})
+        if self.ctx is not None:
+            self.ctx.append_trace_sync({"type": event, "component": "search.first_stage", **payload})
+        elif self.tracer is not None:
+            self.tracer.event("search.first_stage", event, payload)
+            self.tracer.record_search_event(event, payload)
 
     def _save_snapshot(self, kind: str, payload: Any) -> None:
         self._snapshot_counter += 1
-        self.ctx.append_log_sync(kind, file=json.dumps(payload, ensure_ascii=False, indent=2))
+        if self.ctx is not None:
+            self.ctx.append_log_sync(kind, file=json.dumps(payload, ensure_ascii=False, indent=2))
+        elif self.tracer is not None:
+            self.tracer.write_json(f"search/{kind}_{self._snapshot_counter:03d}.json", payload)
 
     def _build_query_profile(self, query: str) -> QueryProfile:
         normalized_query = _normalize_query_text(query)
