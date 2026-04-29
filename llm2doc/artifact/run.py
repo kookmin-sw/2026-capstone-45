@@ -1,10 +1,11 @@
 import asyncio
 import logging
 import os
-
+import threading
+from queue import Queue
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor
-from typing import Sequence, Type, TypeVar
+from typing import NamedTuple, Sequence, Type, TypeVar
 from beartype import beartype
 from pydantic import BaseModel
 from PIL import Image
@@ -29,11 +30,90 @@ PIPELINES: Sequence[Type[ArtifactPipeline]] = [
 ]
 
 
+class PipelineTask(NamedTuple):
+    pipeline_ctx: PipelineContext
+    doc_id: int
+    images: Sequence[Image.Image]
+    doc_artifacts: dict[str, BaseModel]
+    events: dict[tuple[int, str], threading.Event]
+    error_state: dict[str, Exception]
+    done_event: threading.Event
+
+
+_pipeline_queues: dict[str, Queue[PipelineTask | None]] = {}
+_pipeline_threads: list[Thread] = []
+_pipeline_lock = threading.Lock()
+
+
 async def _update_log_status(db: AsyncSession, doc_id: int, status: DocumentStatus, log: str):
     doc = await db.get_one(Document, doc_id)
 
     doc.process_status = status
     doc.process_log += f"{log}\n"
+
+
+def _worker(pipeline_cls: Type[ArtifactPipeline], q: Queue[PipelineTask | None]):
+    now = None
+    while True:
+        task = q.get()
+        if task is None:
+            if now:
+                try:
+                    now.dispose()
+                except Exception:
+                    pass
+            q.task_done()
+            break
+
+        try:
+            if now is None:
+                now = pipeline_cls(task.pipeline_ctx)
+            else:
+                now.ctx = task.pipeline_ctx
+
+            # Wait for inputs
+            for req in pipeline_cls.INPUT_ARTIFACTS:
+                while not task.events[(task.doc_id, req)].is_set():
+                    if "error" in task.error_state:
+                        raise StopIteration()
+                    task.events[(task.doc_id, req)].wait(timeout=0.1)
+
+            if "error" in task.error_state:
+                raise StopIteration()
+
+            if pipeline_cls.ARTIFACT_NAME not in task.doc_artifacts:
+                doc = DocumentContext(
+                    doc_id=task.doc_id,
+                    images=task.images,
+                    artifacts=task.doc_artifacts,
+                )
+                result = now.process(doc)
+                task.doc_artifacts[now.ARTIFACT_NAME] = result
+
+            task.events[(task.doc_id, pipeline_cls.ARTIFACT_NAME)].set()
+        except StopIteration:
+            pass
+        except Exception as e:
+            if "error" not in task.error_state:
+                task.error_state["error"] = e
+        finally:
+            # Unblock this specific event to avoid deadlocks
+            task.events[(task.doc_id, pipeline_cls.ARTIFACT_NAME)].set()
+            task.done_event.set()
+            q.task_done()
+
+
+def _ensure_daemon_threads():
+    with _pipeline_lock:
+        if _pipeline_threads:
+            return
+
+        for pipeline in PIPELINES:
+            q: Queue[PipelineTask | None] = Queue()
+            _pipeline_queues[pipeline.ARTIFACT_NAME] = q
+            t = Thread(target=_worker, args=(pipeline, q), daemon=True)
+            t.start()
+            _pipeline_threads.append(t)
 
 
 @beartype
@@ -43,30 +123,44 @@ def _build_artifact_inner(
     file_paths: Sequence[Sequence[str]],
     artifacts: Sequence[dict[str, BaseModel]],
 ):
+    _ensure_daemon_threads()
+
     images = [[Image.open(x) for x in pages] for pages in file_paths]
 
-    for pipeline in PIPELINES:
-        if all(pipeline.ARTIFACT_NAME in doc_artifacts for doc_artifacts in artifacts):
-            continue
+    events: dict[tuple[int, str], threading.Event] = {}
+    for doc_id in doc_ids:
+        for p in PIPELINES:
+            events[(doc_id, p.ARTIFACT_NAME)] = threading.Event()
 
-        now = pipeline(pipeline_ctx)
-        try:
-            for doc_id, pages, doc_artifacts in zip(doc_ids, images, artifacts):
-                if any(x not in doc_artifacts for x in pipeline.INPUT_ARTIFACTS):
-                    raise ValueError("PIPELINES order is invalid")
+    for doc_id, doc_artifacts in zip(doc_ids, artifacts):
+        for name in doc_artifacts:
+            if (doc_id, name) in events:
+                events[(doc_id, name)].set()
 
-                if pipeline.ARTIFACT_NAME in doc_artifacts:
-                    continue
+    error_state: dict[str, Exception] = {}
+    done_events: list[threading.Event] = []
 
-                doc = DocumentContext(
-                    doc_id=doc_id,
-                    images=pages,
-                    artifacts=doc_artifacts,
-                )
-                result = now.process(doc)
-                doc_artifacts[now.ARTIFACT_NAME] = result
-        finally:
-            now.dispose()
+    for i, doc_id in enumerate(doc_ids):
+        for p in PIPELINES:
+            done_event = threading.Event()
+            done_events.append(done_event)
+
+            task = PipelineTask(
+                pipeline_ctx=pipeline_ctx,
+                doc_id=doc_id,
+                images=images[i],
+                doc_artifacts=artifacts[i],
+                events=events,
+                error_state=error_state,
+                done_event=done_event,
+            )
+            _pipeline_queues[p.ARTIFACT_NAME].put(task)
+
+    for ev in done_events:
+        ev.wait()
+
+    if "error" in error_state:
+        raise error_state["error"]
 
 
 async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
