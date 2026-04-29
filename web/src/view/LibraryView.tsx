@@ -5,14 +5,17 @@ import { DocumentCard } from "#root/component/DocumentCard.tsx";
 import { DocumentCardList } from "#root/component/DocumentCardList.tsx";
 import { EmptyDocumentList } from "#root/component/EmptyDocumentList.tsx";
 import { useMutateCreateDocument } from "#root/query/createDocument";
-import { type Document, useQueryDocumentList } from "#root/query/documentList";
+import {
+	type DocumentListEntry,
+	useQueryDocumentList,
+} from "#root/query/documentList";
 
 export const LibraryView = () => {
 	const { data } = useQueryDocumentList();
 	const { mutate } = useMutateCreateDocument();
 	const [_focusedDoc, setFocusedDoc] = useState<number | null>(null);
 
-	const docs: Document[] = data?.docs ?? [];
+	const docs: DocumentListEntry[] = data?.docs ?? [];
 
 	const onRename = (docId: number) => {
 		setFocusedDoc(docId);

@@ -13,7 +13,7 @@ from llm2doc.dependency import WithDB, WithThreadPool
 from llm2doc.entity import Chat
 from llm2doc.entity.message import MessageDepth
 from llm2doc.repository.chat import create_chat, list_chat, load_chat_message_all, load_rendered_document
-from llm2doc.repository.document import check_document_exists
+from llm2doc.repository.document import check_document_exists, is_all_documents_completed
 from llm2doc.repository.file import get_file_path
 from llm2doc.util import validate_type
 
@@ -38,6 +38,7 @@ class ChatListResponse(BaseModel):
 
 
 class ChatMessageEntry(BaseModel):
+    message_id: int
     depth: MessageDepth
     content: str
     is_markdown: bool
@@ -60,6 +61,10 @@ async def create_chat_route(db: WithDB, thread_pool: WithThreadPool, body: Creat
     all_exists = await check_document_exists(db, [body.target_doc, *body.source_docs])
     if not all_exists:
         raise HTTPException(404, "document not found")
+
+    all_ready = await is_all_documents_completed(db, [body.target_doc, *body.source_docs])
+    if not all_ready:
+        raise HTTPException(400, "document not ready")
 
     display_name = body.query.strip()[:32].strip()
 
@@ -125,6 +130,7 @@ async def get_chat_detail(db: WithDB, chat_id: int):
 
         messages.append(
             ChatMessageEntry(
+                message_id=msg.message_id,
                 depth=msg.depth,
                 content=msg.content_text,
                 is_markdown=msg.is_markdown,

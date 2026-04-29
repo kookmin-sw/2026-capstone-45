@@ -4,7 +4,10 @@ import { DocumentCard } from "#root/component/DocumentCard.tsx";
 import { DocumentCardList } from "#root/component/DocumentCardList.tsx";
 import { EmptyDocumentList } from "#root/component/EmptyDocumentList.tsx";
 import { useMutateCreateChat } from "#root/query/createChat";
-import { type Document, useQueryDocumentList } from "#root/query/documentList";
+import {
+	type DocumentListEntry,
+	useQueryDocumentList,
+} from "#root/query/documentList";
 import { useAppStore } from "#root/store/useAppStore";
 import { useNewChatStore } from "#root/store/useNewChatStore";
 
@@ -17,7 +20,7 @@ export const NewChatView = () => {
 
 	const isDocValid = targetDoc !== null && sourceDocs.length !== 0;
 
-	const docs: Document[] = data?.docs ?? [];
+	const docs: DocumentListEntry[] = data?.docs ?? [];
 
 	const handleCreateChat = async (query: string) => {
 		if (!isDocValid) {

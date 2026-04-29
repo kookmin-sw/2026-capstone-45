@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from llm2doc.dto.document import DocumentListEntry
 from llm2doc.entity import Document, DocumentImage, File
+from llm2doc.entity.document import DocumentStatus
 
 
 async def list_all_documents(db: AsyncSession) -> list[DocumentListEntry]:
@@ -84,3 +85,12 @@ async def load_document_image_all(db: AsyncSession, doc_id: int) -> Sequence[Fil
         return result.scalars().all()
     except NoResultFound:
         raise HTTPException(404, "no such page found")
+
+
+async def is_all_documents_completed(db: AsyncSession, doc_ids: list[int]) -> bool:
+    stmt = select(func.count(Document.doc_id)).where(
+        Document.doc_id.in_(doc_ids), Document.process_status != DocumentStatus.COMPLETED
+    )
+
+    result = await db.execute(stmt)
+    return len(result.all()) == 0

@@ -23,7 +23,7 @@ def find_pdf_files(data_dir: str = "data") -> list[str]:
     return sorted(pdf_files)
 
 
-async def add_all_documents(data_dir: str = "data", build_artifacts: bool = False) -> None:
+async def add_all_documents(data_dir: str = "data", build_artifacts: bool = True) -> None:
     """Scan data directory for PDF files and add them to the database."""
     pdf_files = find_pdf_files(data_dir)
 
@@ -58,7 +58,7 @@ async def add_all_documents(data_dir: str = "data", build_artifacts: bool = Fals
                     assert doc_id is not None
 
                 # Process PDF (render pages to images)
-                await create_document_worker(engine, doc_id, file_id, "pdf")
+                await create_document_worker(engine, doc_id, file_id, "pdf", False)
 
                 doc_ids.append(doc_id)
 

@@ -13,6 +13,7 @@ from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from pydantic import BaseModel
 
+from llm2doc.artifact.run import build_artifact
 from llm2doc.util import validate_type
 from llm2doc.dependency import WithDB, WithThreadPool
 from llm2doc.entity import DocumentStatus, File as FileRow, Document, DocumentImage
@@ -83,7 +84,7 @@ async def create_document(file: Annotated[UploadFile, File()], db: WithDB):
     await db.flush()
 
     doc_id = validate_type(await doc.awaitable_attrs.doc_id, int)
-    asyncio.create_task(create_document_worker(db.bind, doc_id, file_id, file_type))
+    await asyncio.create_task(create_document_worker(db.bind, doc_id, file_id, file_type, True))
 
     return {"id": doc_id}
 
@@ -100,7 +101,7 @@ async def rebuild_artifact(doc_id: int, db: WithDB):
     return {}
 
 
-async def create_document_worker(engine: Any, doc_id: int, file_id: uuid.UUID, file_type: str):
+async def create_document_worker(engine: Any, doc_id: int, file_id: uuid.UUID, file_type: str, build_artifacts: bool):
     engine = validate_type(engine, AsyncEngine)
 
     async def add_images(img_ids: list[uuid.UUID]):
@@ -147,6 +148,9 @@ async def create_document_worker(engine: Any, doc_id: int, file_id: uuid.UUID, f
         await add_images(img_ids)
 
         await update_log_status(DocumentStatus.PROCESSING, f"Saved {len(img_ids)} images.")
+
+        if build_artifacts:
+            asyncio.create_task(build_artifact(engine, [doc_id]))
 
     except Exception as e:
         logging.exception("Failed to process uploaded document", e)

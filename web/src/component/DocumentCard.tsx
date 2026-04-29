@@ -1,12 +1,13 @@
 import {
 	ActionIcon,
 	Button,
+	Loader,
 	type ButtonVariant,
 	type DefaultMantineColor,
 } from "@mantine/core";
-import { Maximize2 } from "lucide-react";
+import { AlertTriangleIcon, Maximize2 } from "lucide-react";
 import { useState } from "react";
-import type { Document } from "#root/query/documentList";
+import type { DocumentListEntry } from "#root/query/documentList";
 import { cn } from "../utils/cn";
 import { Badge } from "./Badge";
 
@@ -18,7 +19,7 @@ export interface DocumentCardButton {
 }
 
 interface DocumentCardProps {
-	document: Document;
+	document: DocumentListEntry;
 	onOpen: () => void;
 	buttons?: DocumentCardButton[];
 	selectionState?: "target" | "source";
@@ -46,11 +47,17 @@ export const DocumentCard = ({
 		>
 			{/* Thumbnail */}
 			<div
-				className="h-[80%] w-full bg-no-repeat bg-cover"
+				className="h-[80%] w-full bg-no-repeat bg-cover flex items-center justify-center"
 				style={{
 					backgroundImage: `url(/api/documents/${doc.doc_id}/image/0)`,
 				}}
-			/>
+			>
+				{doc.process_status === "error" ? (
+					<AlertTriangleIcon size={40} />
+				) : (
+					doc.process_status !== "completed" && <Loader size="xl" />
+				)}
+			</div>
 
 			{/* Footer */}
 			<div className="h-[20%] w-full flex items-center px-3 bg-background border-t border-border pointer-events-none">

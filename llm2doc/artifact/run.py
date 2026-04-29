@@ -16,6 +16,7 @@ from llm2doc.artifact.semantic import SemanticArtifactPipeline
 from llm2doc.context.document import DocumentContext
 from llm2doc.context.pipeline import PipelineContext
 from llm2doc.entity import Document
+from llm2doc.entity.document import DocumentStatus
 from llm2doc.repository.artifact import load_artifact, save_artifact
 from llm2doc.util import join_thread_async
 
@@ -25,6 +26,13 @@ PIPELINES: Sequence[Type[ArtifactPipeline]] = [
     StyleArtifactPipeline,
     SemanticArtifactPipeline,
 ]
+
+
+async def _update_log_status(db: AsyncSession, doc_id: int, status: DocumentStatus, log: str):
+    doc = await db.get_one(Document, doc_id)
+
+    doc.process_status = status
+    doc.process_log += f"{log}\n"
 
 
 @beartype
@@ -72,6 +80,11 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
             thread_pool=exe,
         )
 
+        async with pipeline_ctx.with_db() as db:
+            for doc_id in doc_ids:
+                await _update_log_status(db, doc_id, DocumentStatus.PROCESSING, "Starting artifact build...")
+
+        existing_artifacts: list[set[str]] = []
         artifacts: list[dict[str, BaseModel]] = []
         file_paths: list[list[str]] = []
 
@@ -82,12 +95,14 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
                 file_ids = [x.file_id for x in image_rows]
 
                 artifacts.append(dict())
+                existing_artifacts.append(set())
                 file_paths.append([f"file/{x}" for x in file_ids])
 
                 for pipeline in PIPELINES:
                     loaded = await load_artifact(db, doc_id, pipeline)
                     if loaded is not None:
                         artifacts[i][pipeline.ARTIFACT_NAME] = loaded
+                        existing_artifacts[i].add(pipeline.ARTIFACT_NAME)
 
         thread = Thread(target=_build_artifact_inner, args=(pipeline_ctx, doc_ids, file_paths, artifacts))
         thread.start()
@@ -97,7 +112,16 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
         async with pipeline_ctx.with_db() as db:
             for i, doc_id in enumerate(doc_ids):
                 for name, value in artifacts[i].items():
-                    await save_artifact(db, doc_id, name, value)
+                    # 새로운 아티팩트가 있으면 저장
+                    if name not in existing_artifacts[i]:
+                        await save_artifact(db, doc_id, name, value)
+
+        async with pipeline_ctx.with_db() as db:
+            for doc_id in doc_ids:
+                if len(artifacts[i]) == len(PIPELINES):
+                    await _update_log_status(db, doc_id, DocumentStatus.COMPLETED, "Completed artifact build.")
+                else:
+                    await _update_log_status(db, doc_id, DocumentStatus.ERROR, "Failed to build artifact")
 
 
 T = TypeVar("T", bound=BaseModel)
