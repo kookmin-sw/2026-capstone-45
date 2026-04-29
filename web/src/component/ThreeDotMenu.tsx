@@ -1,3 +1,4 @@
+import { ActionIcon, Button } from "@mantine/core";
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { MenuItem } from "#root/types";
@@ -37,33 +38,40 @@ export const ThreeDotMenu = ({ items, onOpenChange }: ThreeDotMenuProps) => {
 
 	return (
 		<div className="relative" ref={menuRef}>
-			<button
-				type="button"
+			<ActionIcon
+				variant="subtle"
+				color="gray"
 				onClick={handleToggle}
-				className="p-1 rounded-full hover:bg-muted transition-colors"
+				radius="xl"
 			>
 				<MoreHorizontal className="w-5 h-5 text-muted-foreground" />
-			</button>
+			</ActionIcon>
 
 			{open && (
 				<div className="absolute right-0 mt-1 w-36 bg-background border border-border rounded-md shadow-lg z-50 py-1">
 					{items.map((item) => (
-						<button
+						<Button
 							key={item.label}
-							type="button"
-							className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${
-								item.variant === "danger"
-									? "text-destructive"
-									: "text-foreground"
-							}`}
+							variant="subtle"
+							color={item.variant === "danger" ? "red" : "gray"}
+							fullWidth
+							justify="flex-start"
+							size="sm"
 							onClick={(e) => {
 								e.stopPropagation();
 								item.onSelect();
 								setOpen(false);
 							}}
+							styles={{
+								root: {
+									height: "36px",
+									padding: "0 12px",
+									fontWeight: 400,
+								},
+							}}
 						>
 							{item.label}
-						</button>
+						</Button>
 					))}
 				</div>
 			)}

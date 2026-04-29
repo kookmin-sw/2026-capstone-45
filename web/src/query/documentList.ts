@@ -6,11 +6,16 @@ export const DocumentListEntry = z.object({
 	doc_id: z.int32(),
 	display_name: z.string(),
 	pages_cnt: z.int32(),
-	process_status: z.string(),
+	process_status: z.union([
+		z.literal("pending"),
+		z.literal("processing"),
+		z.literal("completed"),
+		z.literal("error"),
+	]),
 	process_log: z.string(),
 });
 
-export type Document = z.infer<typeof DocumentListEntry>;
+export type DocumentListEntry = z.infer<typeof DocumentListEntry>;
 
 const ListDocumentResponse = z.object({
 	docs: z.array(DocumentListEntry),
@@ -23,4 +28,5 @@ export const useQueryDocumentList = () =>
 			const response = await axiosInstance.get("/documents");
 			return await ListDocumentResponse.parseAsync(response.data);
 		},
+		refetchInterval: 5000,
 	});

@@ -1,3 +1,4 @@
+import { ActionIcon, Button } from "@mantine/core";
 import { ChevronLeft, Library, Menu, Plus } from "lucide-react";
 import { ChatHistoryItem } from "#root/component/ChatHistoryItem";
 import { type Chat, useQueryChatList } from "#root/query/chatList";
@@ -31,20 +32,18 @@ export const LeftAside = () => {
 				{!sidebarFolded && (
 					<h2 className="font-bold text-lg text-foreground">지정문서 생성</h2>
 				)}
-				<button
-					type="button"
+				<ActionIcon
+					variant="subtle"
+					color="gray"
 					onClick={toggleSidebar}
-					className={cn(
-						"p-2 rounded-lg hover:bg-muted transition-colors",
-						!sidebarFolded && "ml-auto",
-					)}
+					className={cn(!sidebarFolded && "ml-auto")}
 				>
 					{sidebarFolded ? (
 						<Menu className="w-5 h-5" />
 					) : (
 						<ChevronLeft className="w-5 h-5" />
 					)}
-				</button>
+				</ActionIcon>
 			</div>
 
 			{/* Navigation Actions */}
@@ -53,21 +52,25 @@ export const LeftAside = () => {
 					{ id: "LIBRARY", icon: Library, label: "문서 목록" },
 					{ id: "NEW_CHAT", icon: Plus, label: "새 채팅" },
 				].map(({ id, icon: Icon, label }) => (
-					<button
+					<Button
 						key={id}
-						type="button"
+						variant={view === id ? "filled" : "subtle"}
+						color={view === id ? "blue" : "gray"}
+						fullWidth
+						justify="flex-start"
+						leftSection={<Icon size={20} />}
 						onClick={() => setView(id as "LIBRARY" | "NEW_CHAT")}
-						className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-							view === id
-								? "bg-primary text-primary-foreground shadow-sm"
-								: "text-muted-foreground hover:bg-muted hover:text-foreground"
-						}`}
+						styles={{
+							inner: {
+								justifyContent: sidebarFolded ? "center" : "flex-start",
+							},
+							section: {
+								marginRight: sidebarFolded ? 0 : undefined,
+							},
+						}}
 					>
-						<Icon className="w-5 h-5 shrink-0" />
-						{!sidebarFolded && (
-							<span className="font-semibold text-sm">{label}</span>
-						)}
-					</button>
+						{!sidebarFolded && <span className="font-semibold">{label}</span>}
+					</Button>
 				))}
 			</div>
 

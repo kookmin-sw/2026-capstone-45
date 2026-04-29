@@ -20,7 +20,7 @@ export const ChatDetailResponse = z.object({
 
 export type ChatMessageEntry = z.infer<typeof ChatMessageEntry>;
 
-export const useQueryChatDetail = (chatId: number) =>
+export const useQueryChatDetail = (chatId: number, enabled = true) =>
 	useQuery({
 		queryKey: ["useQueryChatDetail", chatId],
 		queryFn: async () => {
@@ -28,5 +28,6 @@ export const useQueryChatDetail = (chatId: number) =>
 			const data = await ChatDetailResponse.parseAsync(result.data);
 			return data;
 		},
+		enabled,
 		refetchInterval: 5000,
 	});

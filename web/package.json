@@ -14,6 +14,9 @@
 		"format": "biome check --write --unsafe"
 	},
 	"dependencies": {
+		"@mantine/core": "^9.1.1",
+		"@mantine/hooks": "^9.1.1",
+		"@mantine/notifications": "^9.1.1",
 		"@tailwindcss/vite": "^4.2.4",
 		"@tanstack/react-query": "^5.99.0",
 		"axios": "^1.15.2",

@@ -1,3 +1,4 @@
+import { ActionIcon } from "@mantine/core";
 import { Send, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -56,22 +57,26 @@ export const ChatBox = ({
 				/>
 				<div className="flex items-center pb-1">
 					{isStreaming ? (
-						<button
-							type="button"
+						<ActionIcon
+							variant="filled"
+							color="dark"
+							size="lg"
+							radius="xl"
 							onClick={onStop}
-							className="p-2 bg-foreground text-background rounded-xl hover:opacity-90 transition-all active:scale-95"
 						>
-							<Square className="w-4 h-4 fill-current" />
-						</button>
+							<Square size={16} fill="currentColor" />
+						</ActionIcon>
 					) : (
-						<button
-							type="button"
+						<ActionIcon
+							variant="filled"
+							color="blue"
+							size="lg"
+							radius="xl"
 							onClick={handleSend}
 							disabled={disabled || !value.trim()}
-							className="p-2 bg-primary text-primary-foreground rounded-xl disabled:bg-muted-foreground/30 disabled:text-muted-foreground transition-all active:scale-95"
 						>
-							<Send className="w-4 h-4" />
-						</button>
+							<Send size={16} />
+						</ActionIcon>
 					)}
 				</div>
 			</div>

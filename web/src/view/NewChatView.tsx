@@ -1,28 +1,35 @@
-import { useState } from "react";
+import { notifications } from "@mantine/notifications";
 import { ChatBox } from "#root/component/ChatBox";
 import { DocumentCard } from "#root/component/DocumentCard.tsx";
+import { DocumentCardList } from "#root/component/DocumentCardList.tsx";
 import { EmptyDocumentList } from "#root/component/EmptyDocumentList.tsx";
 import { useMutateCreateChat } from "#root/query/createChat";
-import { type Document, useQueryDocumentList } from "#root/query/documentList";
+import {
+	type DocumentListEntry,
+	useQueryDocumentList,
+} from "#root/query/documentList";
 import { useAppStore } from "#root/store/useAppStore";
+import { useNewChatStore } from "#root/store/useNewChatStore";
 
 export const NewChatView = () => {
 	const { data } = useQueryDocumentList();
 	const { mutateAsync: createChat } = useMutateCreateChat();
-	const { setActiveChat } = useAppStore();
-
-	const [targetDoc, setTargetDoc] = useState<number | null>(null);
-	const [sourceDocs, setSourceDocs] = useState<number[]>([]);
+	const { setActiveChat, setView } = useAppStore();
+	const { targetDoc, sourceDocs, setTargetDoc, setSourceDocs, reset } =
+		useNewChatStore();
 
 	const isDocValid = targetDoc !== null && sourceDocs.length !== 0;
 
-	const docs: Document[] = data?.docs ?? [];
+	const docs: DocumentListEntry[] = data?.docs ?? [];
 
 	const handleCreateChat = async (query: string) => {
 		if (!isDocValid) {
-			alert("문서를 선택해주세요.");
+			// UI상 어짜피 막혀있음
 			return;
 		}
+
+		setView("CHAT");
+
 		try {
 			const chatId = await createChat({
 				target_doc: targetDoc,
@@ -30,9 +37,31 @@ export const NewChatView = () => {
 				query,
 			});
 			setActiveChat(chatId.toString());
+			reset();
 		} catch (error) {
-			console.error("Failed to create chat", error);
+			console.error(error);
+			notifications.show({
+				title: "오류",
+				message: "채팅을 생성하는데 실패했습니다",
+				color: "red",
+			});
+
+			const state = useAppStore.getState();
+			if (state.view === "CHAT" && state.activeChatId === null) {
+				state.setView("NEW_CHAT");
+			}
 		}
+	};
+
+	const selections: { id: number; kind: "source" | "target" }[] =
+		sourceDocs.map((docId) => ({ id: docId, kind: "target" }));
+	if (targetDoc !== null) {
+		selections.push({ id: targetDoc, kind: "source" });
+	}
+
+	const removeSelection = (docId: number) => {
+		if (targetDoc === docId) setTargetDoc(null);
+		setSourceDocs((prev) => prev.filter((id) => id !== docId));
 	};
 
 	if (docs.length === 0) {
@@ -47,48 +76,59 @@ export const NewChatView = () => {
 		<div className="flex-1 flex flex-col overflow-hidden">
 			<div className="flex-1 p-8 overflow-y-auto">
 				<div className="max-w-5xl mx-auto">
-					<h1 className="text-3xl font-bold text-foreground mb-8">
+					<h1 className="text-3xl font-bold text-foreground pb-8">
 						새 채팅 시작
 					</h1>
 
-					<div className="mb-8">
-						<h2 className="text-lg font-semibold mb-4">문서 선택</h2>
-						<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-							{docs.map((doc) => (
+					<DocumentCardList>
+						{docs.map((doc) => {
+							const isTarget = targetDoc === doc.doc_id;
+							const isSource = sourceDocs.includes(doc.doc_id);
+
+							return (
 								<DocumentCard
 									key={doc.doc_id}
 									document={doc}
-									mode="select"
 									onOpen={() => {}}
 									selectionState={
-										targetDoc === doc.doc_id
-											? "target"
-											: sourceDocs.includes(doc.doc_id)
-												? "source"
-												: "none"
+										isTarget ? "target" : isSource ? "source" : undefined
 									}
-									onSetTarget={() => {
-										setTargetDoc(doc.doc_id);
-										setSourceDocs((prev) =>
-											prev.filter((id) => id !== doc.doc_id),
-										);
-									}}
-									onAddSource={() => {
-										setSourceDocs((prev) => [
-											...new Set([...prev, doc.doc_id]),
-										]);
-										if (targetDoc === doc.doc_id) setTargetDoc(null);
-									}}
-									onRemoveSelection={() => {
-										if (targetDoc === doc.doc_id) setTargetDoc(null);
-										setSourceDocs((prev) =>
-											prev.filter((id) => id !== doc.doc_id),
-										);
-									}}
+									buttons={[
+										{
+											variant: isTarget ? "light" : "filled",
+											color: "blue",
+											text: isTarget ? "선택 취소" : "타겟 문서로 선택",
+											action: (docId: number) => {
+												if (!isTarget) {
+													setTargetDoc(docId);
+													setSourceDocs((prev) =>
+														prev.filter((id) => id !== docId),
+													);
+												} else {
+													removeSelection(docId);
+												}
+											},
+										},
+										{
+											variant: isSource ? "light" : "filled",
+											color: "gray",
+											text: isSource ? "선택 취소" : "소스 문서로 선택",
+											action: (docId: number) => {
+												if (!isSource) {
+													setSourceDocs((prev) => [
+														...new Set([...prev, docId]),
+													]);
+													if (targetDoc === docId) setTargetDoc(null);
+												} else {
+													removeSelection(docId);
+												}
+											},
+										},
+									]}
 								/>
-							))}
-						</div>
-					</div>
+							);
+						})}
+					</DocumentCardList>
 				</div>
 			</div>
 
