@@ -114,9 +114,6 @@ export const GenerationLogPanel = ({
 						<p className="text-xs text-muted-foreground">chat_id={chatId}</p>
 					</div>
 					<div className="flex items-center gap-2">
-						{isFetching && (
-							<RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />
-						)}
 						<span
 							className={cn(
 								"px-2 py-1 rounded text-xs font-semibold",
