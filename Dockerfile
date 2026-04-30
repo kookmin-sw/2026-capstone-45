@@ -1,4 +1,4 @@
-FROM node:20-slim AS build-web
+FROM node:24-slim AS build-web
 
 ARG CI=true
 ENV PNPM_HOME="/pnpm"
