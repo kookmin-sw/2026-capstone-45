@@ -5,7 +5,7 @@ import logging
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
-from sqlalchemy.exc import NoResultFound
+from sqlalchemy.exc import NoResultFound, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 from pydantic import BaseModel
 
@@ -18,6 +18,7 @@ from llm2doc.entity.message import MessageDepth
 from llm2doc.repository.chat import (
     append_chat_message,
     create_chat,
+    delete_chat,
     list_chat,
     load_chat_message_all,
     load_rendered_document,
@@ -87,6 +88,10 @@ class ChatDetailResponse(BaseModel):
     target_doc: int
     source_docs: list[int]
     messages: list[ChatMessageEntry]
+
+
+class DeleteChatResponse(BaseModel):
+    status: str
 
 
 @router.post("")
@@ -200,6 +205,16 @@ async def get_chat_detail(db: WithDB, chat_id: int):
         source_docs=[x.doc_id for x in source_docs],
         messages=messages,
     )
+
+
+@router.delete("/{chat_id}", response_model=DeleteChatResponse)
+async def delete_chat_route(db: WithDB, chat_id: int):
+    try:
+        await delete_chat(db, chat_id)
+    except IntegrityError:
+        raise HTTPException(400, "Cannot delete chat because some associated files are still in use.")
+
+    return DeleteChatResponse(status="ok")
 
 
 @router.get("/{chat_id}/render")

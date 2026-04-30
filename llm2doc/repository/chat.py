@@ -2,11 +2,11 @@ from io import IOBase
 from typing import Iterable
 from beartype import beartype
 from fastapi import HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from llm2doc.entity import Chat, ChatSource
+from llm2doc.entity import Chat, ChatSource, File
 from llm2doc.entity.message import Message, MessageDepth
 from llm2doc.repository.file import create_file
 
@@ -80,3 +80,15 @@ async def load_rendered_document(db: AsyncSession, chat_id: int):
         raise HTTPException(404, "no chat found")
 
     return result.rendered_file_id
+
+
+async def delete_chat(db: AsyncSession, chat_id: int):
+    chat = await db.get(Chat, chat_id)
+    if chat is None:
+        raise HTTPException(404, "chat not found")
+
+    if chat.rendered_file_id is not None:
+        stmt = delete(File).where(File.file_id == chat.rendered_file_id)
+        await db.execute(stmt)
+
+    await db.delete(chat)

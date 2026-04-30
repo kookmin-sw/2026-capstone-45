@@ -1,7 +1,10 @@
 import { ActionIcon, Button } from "@mantine/core";
 import { ChevronLeft, Library, Menu, Plus } from "lucide-react";
+import { useState } from "react";
 import { ChatHistoryItem } from "#root/component/ChatHistoryItem";
+import { ConfirmDeleteModal } from "#root/component/ConfirmDeleteModal";
 import { type Chat, useQueryChatList } from "#root/query/chatList";
+import { useMutationDeleteChat } from "#root/query/deleteChat";
 import { useAppStore } from "#root/store/useAppStore";
 import { cn } from "../utils/cn";
 
@@ -16,8 +19,24 @@ export const LeftAside = () => {
 	} = useAppStore();
 
 	const { data } = useQueryChatList();
+	const deleteChatMutation = useMutationDeleteChat();
+
+	const [chatToDelete, setChatToDelete] = useState<Chat | null>(null);
 
 	const chats: Chat[] = data?.chats ?? [];
+
+	const handleDeleteConfirm = async () => {
+		if (!chatToDelete) return;
+
+		const idToDelete = chatToDelete.chat_id.toString();
+		await deleteChatMutation.mutateAsync(idToDelete);
+
+		if (activeChatId === idToDelete) {
+			setView("NEW_CHAT");
+		}
+
+		setChatToDelete(null);
+	};
 
 	return (
 		<aside
@@ -89,12 +108,20 @@ export const LeftAside = () => {
 								onSelect={() => setActiveChat(chat.chat_id.toString())}
 								onPin={() => {}} // TODO
 								onRename={() => {}} // TODO
-								onDelete={() => {}} // TODO
+								onDelete={() => setChatToDelete(chat)}
 							/>
 						))}
 					</div>
 				</div>
 			)}
+
+			<ConfirmDeleteModal
+				visible={!!chatToDelete}
+				title="채팅 삭제"
+				message="정말로 이 채팅을 삭제하시겠습니까?"
+				onCancel={() => setChatToDelete(null)}
+				onConfirm={handleDeleteConfirm}
+			/>
 		</aside>
 	);
 };

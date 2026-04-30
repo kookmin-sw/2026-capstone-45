@@ -41,7 +41,7 @@ class Message(Base):
     __tablename__ = "message"
 
     message_id: Mapped[int] = mapped_column(primary_key=True)
-    chat_id: Mapped[int] = mapped_column(ForeignKey("chat.chat_id", onupdate="CASCADE"), nullable=False)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chat.chat_id", onupdate="CASCADE", ondelete="CASCADE"), nullable=False)
     depth: Mapped[MessageDepth] = mapped_column(nullable=False)
 
     content_text: Mapped[str] = mapped_column(Text, nullable=False)
