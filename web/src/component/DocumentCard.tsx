@@ -1,9 +1,9 @@
 import {
 	ActionIcon,
 	Button,
-	Loader,
 	type ButtonVariant,
 	type DefaultMantineColor,
+	Loader,
 } from "@mantine/core";
 import { AlertTriangleIcon, Maximize2 } from "lucide-react";
 import { useState } from "react";

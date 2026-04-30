@@ -1,5 +1,6 @@
-import { ActionIcon } from "@mantine/core";
-import { useMemo, useState } from "react";
+import { ActionIcon, Tooltip } from "@mantine/core";
+import { Printer } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "#root/store/useAppStore";
 import {
 	type TRenderedPage,
@@ -73,13 +74,33 @@ const renderPages = (pages: TRenderedPage[], zoom: number) => {
 	return divs;
 };
 
-function DocumentRender() {
-	const [zoom, setZoom] = useState(500);
+function DocumentRender({
+	chatId,
+	hideControls = false,
+	initialZoom = 500,
+	autoPrint = false,
+}: {
+	chatId?: string;
+	hideControls?: boolean;
+	initialZoom?: number;
+	autoPrint?: boolean;
+}) {
+	const [zoom, setZoom] = useState(initialZoom);
 	const { activeChatId } = useAppStore();
+	const targetChatId = chatId ?? activeChatId;
 	const doc = useQueryRenderedDocument(
-		activeChatId ?? "",
-		activeChatId !== null,
+		targetChatId ?? "",
+		targetChatId !== null && targetChatId !== undefined,
 	);
+
+	useEffect(() => {
+		if (autoPrint && doc.isSuccess) {
+			const timer = setTimeout(() => {
+				window.print();
+			}, 0);
+			return () => clearTimeout(timer);
+		}
+	}, [autoPrint, doc.isSuccess]);
 
 	const renderedPages = useMemo(() => {
 		if (!doc.isSuccess) {
@@ -89,30 +110,51 @@ function DocumentRender() {
 		return renderPages(doc.data.pages, zoom / 1000);
 	}, [doc, zoom]);
 
+	const handlePrint = () => {
+		if (targetChatId) {
+			window.open(`/chat/${targetChatId}/print`, "_blank");
+		}
+	};
+
 	return (
 		<>
-			<div className="p-2 border-b border-border bg-background flex items-center gap-2">
-				<span className="text-sm font-medium ml-2">줌:&nbsp;</span>
-				<ActionIcon
-					variant="light"
-					color="gray"
-					size="sm"
-					onClick={() => setZoom((x) => Math.max(x - 25, 25))}
-				>
-					-
-				</ActionIcon>
-				<ActionIcon
-					variant="light"
-					color="gray"
-					size="sm"
-					onClick={() => setZoom((x) => x + 25)}
-				>
-					+
-				</ActionIcon>
-				<span className="text-sm text-muted-foreground">
-					&nbsp;{zoom / 1000}x
-				</span>
-			</div>
+			{!hideControls && (
+				<div className="p-2 border-b border-border bg-background flex items-center gap-2">
+					<span className="text-sm font-medium ml-2">줌:&nbsp;</span>
+					<ActionIcon
+						variant="light"
+						color="gray"
+						size="sm"
+						onClick={() => setZoom((x) => Math.max(x - 25, 25))}
+					>
+						-
+					</ActionIcon>
+					<ActionIcon
+						variant="light"
+						color="gray"
+						size="sm"
+						onClick={() => setZoom((x) => x + 25)}
+					>
+						+
+					</ActionIcon>
+					<span className="text-sm text-muted-foreground">
+						&nbsp;{zoom / 1000}x
+					</span>
+					<div className="ml-auto flex items-center gap-2">
+						<Tooltip label="인쇄하기">
+							<ActionIcon
+								variant="subtle"
+								color="gray"
+								size="sm"
+								onClick={handlePrint}
+								disabled={!targetChatId}
+							>
+								<Printer size={16} />
+							</ActionIcon>
+						</Tooltip>
+					</div>
+				</div>
+			)}
 			<div className="printable flex-1 overflow-auto bg-muted p-4">
 				{renderedPages}
 			</div>

@@ -47,7 +47,8 @@ const stringify = (value: unknown) => {
 const summaryText = (summary: Record<string, unknown>, key: string) => {
 	const value = summary[key];
 	if (value == null) return "-";
-	if (typeof value === "string" || typeof value === "number") return String(value);
+	if (typeof value === "string" || typeof value === "number")
+		return String(value);
 	return stringify(value);
 };
 
@@ -67,7 +68,10 @@ export const GenerationLogPanel = ({
 	messages,
 }: GenerationLogPanelProps) => {
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
-	const { data, isFetching } = useQueryChatLogs(chatId, Number.isFinite(chatId));
+	const { data, isFetching } = useQueryChatLogs(
+		chatId,
+		Number.isFinite(chatId),
+	);
 	const { data: selectedFileContent } = useQueryChatLogFile(
 		chatId,
 		selectedPath,
@@ -80,7 +84,12 @@ export const GenerationLogPanel = ({
 	);
 	const events = data?.events ?? [];
 	const latestEvent = data?.latest_event;
-	const files = data?.files ?? { llm: [], search: [], retrieval: [], output: [] };
+	const files = data?.files ?? {
+		llm: [],
+		search: [],
+		retrieval: [],
+		output: [],
+	};
 	const fileGroups = [
 		["LLM", files.llm],
 		["Search", files.search],
@@ -102,12 +111,12 @@ export const GenerationLogPanel = ({
 				<div className="flex items-center justify-between gap-3 mb-3">
 					<div>
 						<h3 className="font-semibold text-sm">생성 상태</h3>
-						<p className="text-xs text-muted-foreground">
-							chat_id={chatId}
-						</p>
+						<p className="text-xs text-muted-foreground">chat_id={chatId}</p>
 					</div>
 					<div className="flex items-center gap-2">
-						{isFetching && <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />}
+						{isFetching && (
+							<RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />
+						)}
 						<span
 							className={cn(
 								"px-2 py-1 rounded text-xs font-semibold",
@@ -153,7 +162,6 @@ export const GenerationLogPanel = ({
 					<div className="space-y-2 max-h-72 overflow-y-auto pr-1">
 						{events.slice(-120).map((event, index) => (
 							<div
-								// biome-ignore lint/suspicious/noArrayIndexKey: append-only event log
 								key={`${event.ts ?? index}-${event.event}`}
 								className="grid grid-cols-[1fr_auto] gap-3 border-l-2 border-border pl-3 py-1"
 							>
