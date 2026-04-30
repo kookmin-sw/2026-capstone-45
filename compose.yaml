@@ -3,6 +3,8 @@ services:
     build: .
     ports:
       - "5000:80"
+    volumes:
+      - /app/db.sqlite3
     shm_size: 64g
     restart: unless-stopped
     deploy:
