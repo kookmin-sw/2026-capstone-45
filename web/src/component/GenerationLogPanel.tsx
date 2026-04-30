@@ -1,5 +1,5 @@
 import { Button } from "@mantine/core";
-import { Clock3, FileJson, Loader2, RefreshCw } from "lucide-react";
+import { Clock3, FileJson, Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ChatMessageEntry } from "#root/query/chatDetail";
 import { useQueryChatLogFile, useQueryChatLogs } from "#root/query/chatLogs";
@@ -68,10 +68,7 @@ export const GenerationLogPanel = ({
 	messages,
 }: GenerationLogPanelProps) => {
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
-	const { data, isFetching } = useQueryChatLogs(
-		chatId,
-		Number.isFinite(chatId),
-	);
+	const { data } = useQueryChatLogs(chatId);
 	const { data: selectedFileContent } = useQueryChatLogFile(
 		chatId,
 		selectedPath,
