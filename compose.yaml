@@ -18,16 +18,18 @@ services:
     depends_on:
       paddleocr-vlm-server:
         condition: service_healthy
+    extra_hosts:
+      - host.docker.internal:host-gateway
     environment:
-      - OPENAI_BASE_URL=https://openrouter.ai/api/v1
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=qwen/qwen3.5-plus-02-15
-      - OPENAI_LITE_BASE_URL=https://openrouter.ai/api/v1
-      - OPENAI_LITE_API_KEY=${OPENAI_LITE_API_KEY}
-      - OPENAI_LITE_MODEL=openai/gpt-oss-20b
-      - OPENAI_EMBED_BASE_URL=https://openrouter.ai/api/v1
-      - OPENAI_EMBED_API_KEY=${OPENAI_EMBED_API_KEY}
-      - OPENAI_EMBED_MODEL=qwen/qwen3-embedding-8b
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:?OPENAI_API_KEY is empty}
+      - OPENAI_MODEL=${OPENAI_MODEL:-qwen/qwen3.5-plus-02-15}
+      - OPENAI_LITE_BASE_URL=${OPENAI_LITE_BASE_URL:-https://openrouter.ai/api/v1}
+      - OPENAI_LITE_API_KEY=${OPENAI_LITE_API_KEY:?OPENAI_LITE_API_KEY is empty}
+      - OPENAI_LITE_MODEL=${OPENAI_LITE_MODEL:-openai/gpt-oss-20b}
+      - OPENAI_EMBED_BASE_URL=${OPENAI_EMBED_BASE_URL:-https://openrouter.ai/api/v1}
+      - OPENAI_EMBED_API_KEY=${OPENAI_EMBED_API_KEY:?OPENAI_EMBED_API_KEY is empty}
+      - OPENAI_EMBED_MODEL=${OPENAI_EMBED_MODEL:-qwen/qwen3-embedding-8b}
       - PADDLEOCR_VL_REC_SERVER_URL=http://paddleocr-vlm-server:8080/v1
       - PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
       - FLAGS_fraction_of_gpu_memory_to_use=0.8
