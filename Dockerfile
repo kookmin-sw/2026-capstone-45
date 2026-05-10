@@ -1,4 +1,12 @@
-FROM node:24-slim AS build-web
+FROM debian:trixie AS build-tessdata
+
+WORKDIR /app
+
+RUN apt update && apt install -y git
+
+RUN git clone --depth 1 https://github.com/tesseract-ocr/tessdata.git tessdata
+
+FROM node:24-trixie AS build-web
 
 ARG CI=true
 ENV PNPM_HOME="/pnpm"
@@ -30,6 +38,7 @@ COPY ./llm2doc /app/llm2doc
 COPY ./data/*.pdf /app/data/
 COPY ./data/font /app/data/font
 COPY --from=build-web /web/dist /app/web_static
+COPY --from=build-tessdata /app/tessdata /app/tessdata
 
 RUN mkdir /app_data && \
     ln -s /app_data/db.sqlite3 /app/db.sqlite3
