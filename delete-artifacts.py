@@ -8,7 +8,7 @@ from llm2doc.util import validate_type
 
 
 async def main():
-    artifact_names = ["SemanticArtifact"]
+    artifact_names = ["LayoutArtifact", "SemanticArtifact"]
 
     async with lifespan(None) as life:
         engine = validate_type(life["db"], AsyncEngine)
