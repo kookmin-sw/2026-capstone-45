@@ -68,11 +68,6 @@ def _worker(pipeline_cls: Type[ArtifactPipeline], q: Queue[PipelineTask | None])
             break
 
         try:
-            if now is None:
-                now = pipeline_cls(task.pipeline_ctx)
-            else:
-                now.ctx = task.pipeline_ctx
-
             # Wait for inputs
             for req in pipeline_cls.INPUT_ARTIFACTS:
                 while not task.events[(task.doc_id, req)].is_set():
@@ -84,7 +79,13 @@ def _worker(pipeline_cls: Type[ArtifactPipeline], q: Queue[PipelineTask | None])
                 raise StopIteration()
 
             if pipeline_cls.ARTIFACT_NAME not in task.doc_artifacts:
+                if now is None:
+                    now = pipeline_cls(task.pipeline_ctx)
+                else:
+                    now.ctx = task.pipeline_ctx
+
                 doc = DocumentContext(
+                    pipeline_ctx=task.pipeline_ctx,
                     doc_id=task.doc_id,
                     images=task.images,
                     artifacts=task.doc_artifacts,
