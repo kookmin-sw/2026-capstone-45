@@ -22,13 +22,9 @@ def image_as_data_uri(img: Image.Image) -> str:
     buf = BytesIO()
     img.save(buf, "png")
 
-    buf.seek(0)
+    s = base64.standard_b64encode(buf.getvalue()).decode()
 
-    output = BytesIO(b"data:image/png;base64,")
-    output.seek(0, 2)
-    base64.encode(buf, output)
-
-    return output.getvalue().decode()
+    return "data:image/png;base64," + s
 
 
 async def join_thread_async(thread: Thread):

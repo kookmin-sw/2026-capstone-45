@@ -12,7 +12,6 @@ from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from llm2doc.artifact.base import ArtifactPipeline
-from llm2doc.artifact.layout import LayoutArtifactPipeline
 from llm2doc.artifact.ocr import OCRArtifactPipeline
 from llm2doc.artifact.style import StyleArtifactPipeline
 from llm2doc.artifact.semantic import SemanticArtifactPipeline
@@ -26,7 +25,6 @@ from llm2doc.util import join_thread_async
 
 PIPELINES: Sequence[Type[ArtifactPipeline]] = [
     OCRArtifactPipeline,
-    LayoutArtifactPipeline,
     StyleArtifactPipeline,
     SemanticArtifactPipeline,
 ]
