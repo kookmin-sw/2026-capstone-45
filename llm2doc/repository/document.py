@@ -94,3 +94,8 @@ async def is_all_documents_completed(db: AsyncSession, doc_ids: list[int]) -> bo
 
     result = await db.execute(stmt)
     return result.scalar_one() == 0
+
+
+async def append_document_log(db: AsyncSession, doc_id: int, msg: str):
+    doc = await db.get_one(Document, doc_id)
+    doc.process_log += msg.strip() + "\n"

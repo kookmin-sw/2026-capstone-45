@@ -9,7 +9,7 @@
 	},
 	"scripts": {
 		"dev": "vite --configLoader native",
-		"build": "tsc -b && vite build --configLoader native",
+		"build": "vite build --configLoader native",
 		"lint": "tsc -b --noEmit && biome check",
 		"preview": "vite preview",
 		"format": "biome check --write --unsafe"
