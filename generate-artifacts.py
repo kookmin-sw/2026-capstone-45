@@ -1,4 +1,5 @@
 import asyncio
+import dotenv
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -9,6 +10,8 @@ from llm2doc.util import validate_type
 
 
 async def main():
+    dotenv.load_dotenv(override=True)
+
     async with lifespan(None) as life:
         engine = validate_type(life["db"], AsyncEngine)
 
