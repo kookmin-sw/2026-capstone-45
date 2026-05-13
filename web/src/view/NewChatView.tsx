@@ -1,9 +1,11 @@
+import { FileButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { ChatBox } from "#root/component/ChatBox";
 import { DocumentCard } from "#root/component/DocumentCard.tsx";
 import { DocumentCardList } from "#root/component/DocumentCardList.tsx";
 import { EmptyDocumentList } from "#root/component/EmptyDocumentList.tsx";
 import { useMutateCreateChat } from "#root/query/createChat";
+import { useMutateCreateDocument } from "#root/query/createDocument";
 import {
 	type DocumentListEntry,
 	useQueryDocumentList,
@@ -13,12 +15,19 @@ import { useNewChatStore } from "#root/store/useNewChatStore";
 
 export const NewChatView = () => {
 	const { data } = useQueryDocumentList();
+	const { mutateAsync: createDocument } = useMutateCreateDocument();
 	const { mutateAsync: createChat } = useMutateCreateChat();
 	const { setActiveChat, setView } = useAppStore();
 	const { targetDoc, sourceDocs, setTargetDoc, setSourceDocs, reset } =
 		useNewChatStore();
 
 	const isDocValid = targetDoc !== null && sourceDocs.length !== 0;
+
+	const handleUpload = async (file: File | null) => {
+		if (file) {
+			await createDocument(file);
+		}
+	};
 
 	const docs: DocumentListEntry[] = data?.docs ?? [];
 
@@ -67,7 +76,9 @@ export const NewChatView = () => {
 	if (docs.length === 0) {
 		return (
 			<div className="flex-1 p-8">
-				<EmptyDocumentList onAddFile={() => {}} />
+				<FileButton onChange={handleUpload} accept="application/pdf,text/plain">
+					{(props) => <EmptyDocumentList onAddFile={props.onClick} />}
+				</FileButton>
 			</div>
 		);
 	}
