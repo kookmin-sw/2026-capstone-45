@@ -22,6 +22,7 @@ from llm2doc.repository.chat import (
     list_chat,
     load_chat_message_all,
     load_rendered_document,
+    rename_chat,
 )
 from llm2doc.repository.document import check_document_exists, is_all_documents_completed
 from llm2doc.repository.file import get_file_path
@@ -90,8 +91,8 @@ class ChatDetailResponse(BaseModel):
     messages: list[ChatMessageEntry]
 
 
-class DeleteChatResponse(BaseModel):
-    status: str
+class RenameChatRequest(BaseModel):
+    display_name: str
 
 
 @router.post("")
@@ -207,14 +208,26 @@ async def get_chat_detail(db: WithDB, chat_id: int):
     )
 
 
-@router.delete("/{chat_id}", response_model=DeleteChatResponse)
+@router.delete("/{chat_id}")
 async def delete_chat_route(db: WithDB, chat_id: int):
     try:
         await delete_chat(db, chat_id)
     except IntegrityError:
         raise HTTPException(400, "Cannot delete chat because some associated files are still in use.")
 
-    return DeleteChatResponse(status="ok")
+    return {}
+
+
+@router.put("/{chat_id}")
+async def rename_chat_route(db: WithDB, chat_id: int, body: RenameChatRequest):
+    display_name = body.display_name.strip()
+    if not display_name:
+        raise HTTPException(400, "display name cannot be empty")
+    if len(display_name) > 64:
+        raise HTTPException(400, "display name too long")
+
+    await rename_chat(db, chat_id, display_name)
+    return {}
 
 
 @router.get("/{chat_id}/render")

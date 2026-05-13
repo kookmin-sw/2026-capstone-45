@@ -92,3 +92,11 @@ async def delete_chat(db: AsyncSession, chat_id: int):
         await db.execute(stmt)
 
     await db.delete(chat)
+
+
+async def rename_chat(db: AsyncSession, chat_id: int, display_name: str):
+    chat = await db.get(Chat, chat_id)
+    if chat is None:
+        raise HTTPException(404, "chat not found")
+
+    chat.display_name = display_name

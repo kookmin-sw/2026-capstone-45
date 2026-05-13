@@ -3,6 +3,7 @@ import { ChevronLeft, Library, Menu, Plus } from "lucide-react";
 import { useState } from "react";
 import { ChatHistoryItem } from "#root/component/ChatHistoryItem";
 import { ConfirmDeleteModal } from "#root/component/ConfirmDeleteModal";
+import { RenameChatModal } from "#root/component/RenameChatModal";
 import { type Chat, useQueryChatList } from "#root/query/chatList";
 import { useMutationDeleteChat } from "#root/query/deleteChat";
 import { useAppStore } from "#root/store/useAppStore";
@@ -22,6 +23,7 @@ export const LeftAside = () => {
 	const deleteChatMutation = useMutationDeleteChat();
 
 	const [chatToDelete, setChatToDelete] = useState<Chat | null>(null);
+	const [chatToRename, setChatToRename] = useState<Chat | null>(null);
 
 	const chats: Chat[] = data?.chats ?? [];
 
@@ -36,6 +38,9 @@ export const LeftAside = () => {
 		}
 
 		setChatToDelete(null);
+	};
+	const openRenameModal = (chat: Chat) => {
+		setChatToRename(chat);
 	};
 
 	return (
@@ -107,7 +112,7 @@ export const LeftAside = () => {
 								active={activeChatId === chat.chat_id.toString()}
 								onSelect={() => setActiveChat(chat.chat_id.toString())}
 								onPin={() => {}} // TODO
-								onRename={() => {}} // TODO
+								onRename={() => openRenameModal(chat)}
 								onDelete={() => setChatToDelete(chat)}
 							/>
 						))}
@@ -121,6 +126,13 @@ export const LeftAside = () => {
 				message="정말로 이 채팅을 삭제하시겠습니까?"
 				onCancel={() => setChatToDelete(null)}
 				onConfirm={handleDeleteConfirm}
+			/>
+
+			<RenameChatModal
+				chatId={chatToRename?.chat_id.toString() ?? ""}
+				currentName={chatToRename?.display_name ?? ""}
+				visible={!!chatToRename}
+				onClose={() => setChatToRename(null)}
 			/>
 		</aside>
 	);
