@@ -19,7 +19,13 @@ from llm2doc.dependency import WithDB, WithThreadPool
 from llm2doc.entity import DocumentStatus, File as FileRow, Document, DocumentImage
 from llm2doc.dto.document import DocumentListEntry
 from llm2doc.repository.artifact import clear_artifacts
-from llm2doc.repository.document import list_all_documents, load_document, load_document_image, rename_document
+from llm2doc.repository.document import (
+    list_all_documents,
+    load_document,
+    load_document_image,
+    rename_document,
+    delete_document,
+)
 
 
 router = APIRouter(prefix="/documents")
@@ -50,6 +56,12 @@ async def get_document_image(db: WithDB, doc_id: int, page: int):
 @router.put("/{doc_id}")
 async def rename_document_route(db: WithDB, doc_id: int, body: RenameDocumentRequest):
     await rename_document(db, doc_id, body.display_name)
+    return {}
+
+
+@router.delete("/{doc_id}")
+async def delete_document_route(db: WithDB, doc_id: int):
+    await delete_document(db, doc_id)
     return {}
 
 

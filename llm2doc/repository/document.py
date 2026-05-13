@@ -104,3 +104,10 @@ async def rename_document(db: AsyncSession, doc_id: int, display_name: str):
 async def append_document_log(db: AsyncSession, doc_id: int, msg: str):
     doc = await db.get_one(Document, doc_id)
     doc.process_log += msg.strip() + "\n"
+
+
+async def delete_document(db: AsyncSession, doc_id: int):
+    doc = await db.get_one(Document, doc_id)
+
+    await db.execute(doc.images.delete())
+    await db.delete(doc)

@@ -1,11 +1,13 @@
 import { Button, FileButton } from "@mantine/core";
 import { Plus } from "lucide-react";
 import { useState } from "react";
+import { ConfirmDeleteModal } from "#root/component/ConfirmDeleteModal.tsx";
 import { DocumentCard } from "#root/component/DocumentCard.tsx";
 import { DocumentCardList } from "#root/component/DocumentCardList.tsx";
 import { EmptyDocumentList } from "#root/component/EmptyDocumentList.tsx";
 import { RenameDocumentModal } from "#root/component/RenameDocumentModal.tsx";
 import { useMutateCreateDocument } from "#root/query/createDocument";
+import { useMutationDeleteDocument } from "#root/query/deleteDocument";
 import {
 	type DocumentListEntry,
 	useQueryDocumentList,
@@ -14,7 +16,12 @@ import {
 export const LibraryView = () => {
 	const { data } = useQueryDocumentList();
 	const { mutate } = useMutateCreateDocument();
+	const { mutate: deleteDocument } = useMutationDeleteDocument();
 	const [renameModalDoc, setRenameModalDoc] = useState<{
+		docId: number;
+		displayName: string;
+	} | null>(null);
+	const [deleteModalDoc, setDeleteModalDoc] = useState<{
 		docId: number;
 		displayName: string;
 	} | null>(null);
@@ -28,8 +35,18 @@ export const LibraryView = () => {
 		}
 	};
 
-	const onDelete = (_docId: number) => {
-		//TODO: Show modal
+	const onDelete = (docId: number) => {
+		const doc = docs.find((d) => d.doc_id === docId);
+		if (doc) {
+			setDeleteModalDoc({ docId, displayName: doc.display_name });
+		}
+	};
+
+	const handleConfirmDelete = () => {
+		if (deleteModalDoc) {
+			deleteDocument(deleteModalDoc.docId);
+			setDeleteModalDoc(null);
+		}
 	};
 
 	const handleUpload = (file: File | null) => {
@@ -103,6 +120,15 @@ export const LibraryView = () => {
 					currentName={renameModalDoc.displayName}
 					visible={true}
 					onClose={() => setRenameModalDoc(null)}
+				/>
+			)}
+			{deleteModalDoc && (
+				<ConfirmDeleteModal
+					visible={true}
+					title="문서 삭제"
+					message={`"${deleteModalDoc.displayName}"을(를) 삭제하시겠습니까?`}
+					onCancel={() => setDeleteModalDoc(null)}
+					onConfirm={handleConfirmDelete}
 				/>
 			)}
 		</div>
