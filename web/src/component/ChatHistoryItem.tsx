@@ -8,7 +8,6 @@ interface ChatHistoryItemProps {
 	chat: Chat;
 	active: boolean;
 	onSelect: () => void;
-	onPin: () => void;
 	onRename: () => void;
 	onDelete: () => void;
 }
@@ -17,12 +16,10 @@ export const ChatHistoryItem = ({
 	chat,
 	active,
 	onSelect,
-	onPin,
 	onRename,
 	onDelete,
 }: ChatHistoryItemProps) => {
 	const menuItems: MenuItem[] = [
-		{ label: "고정", onSelect: onPin },
 		{ label: "이름 바꾸기", onSelect: onRename },
 		{ label: "삭제", onSelect: onDelete, variant: "danger" },
 	];

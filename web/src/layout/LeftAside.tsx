@@ -111,7 +111,6 @@ export const LeftAside = () => {
 								chat={chat}
 								active={activeChatId === chat.chat_id.toString()}
 								onSelect={() => setActiveChat(chat.chat_id.toString())}
-								onPin={() => {}} // TODO
 								onRename={() => openRenameModal(chat)}
 								onDelete={() => setChatToDelete(chat)}
 							/>
