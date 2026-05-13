@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from openai import AsyncOpenAI
-from openai.types.responses.response_input_param import FunctionCallOutput
 
 from llm2doc.artifact.ocr import OCRArtifact
 from llm2doc.artifact.semantic import SemanticArtifact
@@ -641,22 +640,24 @@ class ToolSearchSourceDocument:
 
         self.description = {
             "type": "function",
-            "name": "search_source_document",
-            "description": (
-                "Collect first-stage source document candidates relevant to the query. "
-                "Returns ranked candidate blocks for deciding what document/page to fetch next."
-            ),
-            "strict": True,
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "A natural-language search query for discovering useful source document candidates.",
+            "function": {
+                "name": "search_source_document",
+                "description": (
+                    "Collect first-stage source document candidates relevant to the query. "
+                    "Returns ranked candidate blocks for deciding what document/page to fetch next."
+                ),
+                "strict": True,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "A natural-language search query for discovering useful source document candidates.",
+                        },
                     },
+                    "required": ["query"],
+                    "additionalProperties": False,
                 },
-                "required": ["query"],
-                "additionalProperties": False,
             },
         }
 
@@ -698,7 +699,7 @@ class ToolSearchSourceDocument:
             _build_bm25_documents(list(self.records_by_id.values()))
         )
 
-    async def invoke(self, param: str, call_id: str) -> FunctionCallOutput:
+    async def invoke(self, param: str, call_id: str) -> dict[str, Any]:
         """OpenAI function-call 인터페이스를 일반 검색 함수로 연결한다."""
         param_parsed = json.loads(param)
         query: str = param_parsed["query"]

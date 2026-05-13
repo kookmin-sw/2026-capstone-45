@@ -8,7 +8,6 @@ import json
 import re
 
 from typing import Any, Sequence
-from openai.types.responses.response_input_param import FunctionCallOutput
 
 from llm2doc.artifact.ocr import OCRArtifact
 from llm2doc.context.write import WriteContext
@@ -35,27 +34,29 @@ class ToolFetchSourceDocument:
 
         self.description = {
             "type": "function",
-            "name": "fetch_source_document",
-            "description": "Fetch source document.",
-            "strict": True,
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "document_id": {
-                        "type": "number",
-                        "description": "The id of the document. Starts from 1.",
+            "function": {
+                "name": "fetch_source_document",
+                "description": "Fetch source document.",
+                "strict": True,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "document_id": {
+                            "type": "number",
+                            "description": "The id of the document. Starts from 1.",
+                        },
+                        "page_id": {
+                            "type": "number",
+                            "description": "The page_id of the document. This is different from semantic page number (if any) and strictly counts up from 1.",
+                        },
                     },
-                    "page_id": {
-                        "type": "number",
-                        "description": "The page_id of the document. This is different from semantic page number (if any) and strictly counts up from 1.",
-                    },
+                    "required": ["document_id", "page_id"],
+                    "additionalProperties": False,
                 },
-                "required": ["document_id", "page_id"],
-                "additionalProperties": False,
             },
         }
 
-    async def invoke(self, param: str, call_id: str) -> FunctionCallOutput:
+    async def invoke(self, param: str, call_id: str) -> dict[str, Any]:
         """LLM 함수 호출 포맷을 받아 페이지 HTML을 반환한다.
 
         입력 검증을 이 함수에서 모두 처리하므로, 잘못된 문서 ID나 페이지 번호가

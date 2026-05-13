@@ -11,7 +11,6 @@ from openai import AsyncOpenAI
 from beartype import beartype
 from bs4 import BeautifulSoup
 from typing import Sequence, Any, cast
-from openai.types.responses.response_input_param import ResponseInputParam
 
 
 from llm2doc.artifact.ocr import OCRArtifact, OCRArtifactPipeline
@@ -220,6 +219,14 @@ def response_to_jsonable(response: Any) -> Any:
 def extract_response_text(response: Any) -> str:
     """Extracts the actual text content from the Response object, handling reasoning blocks properly."""
     try:
+        if hasattr(response, "choices") and len(response.choices) > 0:
+            content = response.choices[0].message.content
+            if content:
+                return content.strip()
+    except Exception:
+        pass
+
+    try:
         parts = []
         if hasattr(response, "output") and isinstance(response.output, list):
             for item in response.output:
@@ -384,7 +391,7 @@ def normalize_analysis_payload(
 async def maybe_generate_analysis(
     ctx: WriteContext,
     client: AsyncOpenAI,
-    input_items: ResponseInputParam,
+    input_items: list[Any],
     query: str,
     *,
     component: str,
@@ -397,13 +404,13 @@ async def maybe_generate_analysis(
         }
     )
     analysis_prompt = PROMPT_ANALYZE_TRACE.format(source_documents=", ".join([str(x) for x in ctx.source_doc_ids]))
-    response = await client.responses.create(
+    response = await client.chat.completions.create(
         model=os.environ["OPENAI_MODEL"],
-        input=input_items
+        messages=input_items
         + [
             {
                 "role": "user",
-                "content": [{"type": "input_text", "text": analysis_prompt}],
+                "content": analysis_prompt,
             }
         ],
     )
@@ -434,7 +441,7 @@ async def maybe_generate_analysis(
 async def request_final_document(
     ctx: WriteContext,
     client: AsyncOpenAI,
-    input_items: ResponseInputParam,
+    input_items: list[Any],
     *,
     component: str,
 ) -> str:
@@ -447,12 +454,12 @@ async def request_final_document(
         final_input.append(
             {
                 "role": "user",
-                "content": [{"type": "input_text", "text": prompt_text}],
+                "content": prompt_text,
             }
         )
-        response = await client.responses.create(
+        response = await client.chat.completions.create(
             model=os.environ["OPENAI_MODEL"],
-            input=final_input,
+            messages=final_input,
         )
         response_payload = response_to_jsonable(response)
         ctx.trace_file(f"llm/final_document_response_attempt_{attempt:03d}.json", response_payload)
@@ -487,7 +494,7 @@ async def request_final_document(
                 "preview": output_text[:500],
             }
         )
-        final_input += response.output
+        final_input.append(response.choices[0].message.model_dump(exclude_unset=True))
         prompt_text = PROMPT_FINAL_DOCUMENT_RETRY
 
     await ctx.append_log("write_output", file=last_output_text)
@@ -527,12 +534,10 @@ async def write_document(
 
     fulfiled_tool_calls: set[str] = set()
 
-    input: ResponseInputParam = [
+    input: list[Any] = [
         {
             "role": "user",
-            "content": [
-                {"type": "input_text", "text": imagine_prompt},
-            ],
+            "content": imagine_prompt,
         }
     ]
     loop_idx = 0
@@ -542,9 +547,9 @@ async def write_document(
         ctx.trace_file(f"llm/tool_loop_request_{loop_idx:03d}.json", input)
         await ctx.append_log("llm_api_response", json.dumps(input, ensure_ascii=False, indent=2))
 
-        response = await client.responses.create(
+        response = await client.chat.completions.create(
             model=os.environ["OPENAI_MODEL"],
-            input=input,
+            messages=input,
             tools=[x.description for x in tools],
             tool_choice="auto",
         )
@@ -552,67 +557,73 @@ async def write_document(
         ctx.trace_file(f"llm/tool_loop_response_{loop_idx:03d}.json", response_to_jsonable(response))
         await ctx.append_log("llm_api_response", response.model_dump_json())
 
-        for item in response.output:
-            try:
-                if item.type == "reasoning" and item.content is not None:
-                    for content in item.content:
-                        await ctx.append_message(MessageDepth.REASONING, content.text)
-            except Exception:
-                pass
+        message = response.choices[0].message
+        reasoning = getattr(message, "reasoning_content", None)
+        if reasoning:
+            await ctx.append_message(MessageDepth.REASONING, reasoning)
 
-        input += response.model_dump(mode="python")["output"]
+        input.append(message.model_dump(exclude_unset=True))
 
-        tool_calls = [
-            item for item in response.output if item.type == "function_call" and item.call_id not in fulfiled_tool_calls
-        ]
-        if len(tool_calls) == 0:
+        tool_calls = message.tool_calls or []
+        pending_calls = [tc for tc in tool_calls if tc.id not in fulfiled_tool_calls]
+
+        if not pending_calls:
             break
 
         # 모델이 요청한 도구를 실제 파이썬 객체에 매핑해 실행한다.
-        for tool_call in tool_calls:
+        for tool_call in pending_calls:
+            if tool_call.type != "function":
+                continue
+            
             await ctx.append_trace(
                 {
                     "type": "tool_requested",
                     "component": component,
-                    "tool": tool_call.name,
-                    "call_id": tool_call.call_id,
-                    "arguments": tool_call.arguments,
+                    "tool": tool_call.function.name,
+                    "call_id": tool_call.id,
+                    "arguments": tool_call.function.arguments,
                 }
             )
             found = False
             for tool in tools:
-                if tool_call.name == tool.description["name"]:
+                if tool_call.function.name == tool.description["function"]["name"]:
                     found = True
                     break
 
-            fulfiled_tool_calls.add(tool_call.call_id)
+            fulfiled_tool_calls.add(tool_call.id)
 
             tool_started = time.perf_counter()
             if found:
-                result = await tool.invoke(tool_call.arguments, tool_call.call_id)
+                raw_result = await tool.invoke(tool_call.function.arguments, tool_call.id)
+                content = raw_result.get("output", "") if isinstance(raw_result, dict) else str(raw_result)
+                result = {
+                    "role": "tool",
+                    "content": content,
+                    "tool_call_id": tool_call.id,
+                }
                 input.append(result)
             else:
                 result = {
-                    "type": "function_call_output",
-                    "output": "Error: No such tool found.",
-                    "call_id": tool_call.call_id,
+                    "role": "tool",
+                    "content": "Error: No such tool found.",
+                    "tool_call_id": tool_call.id,
                 }
                 input.append(result)
             tool_duration_ms = (time.perf_counter() - tool_started) * 1000
 
             await ctx.append_message(
                 MessageDepth.TOOL_CALL,
-                json.dumps({"arguments": tool_call.arguments, "output": result}, ensure_ascii=False),
+                json.dumps({"arguments": tool_call.function.arguments, "output": result}, ensure_ascii=False),
             )
 
             await ctx.append_trace(
                 {
                     "type": "tool_result",
                     "component": component,
-                    "tool": tool_call.name,
-                    "call_id": tool_call.call_id,
+                    "tool": tool_call.function.name,
+                    "call_id": tool_call.id,
                     "duration_ms": tool_duration_ms,
-                    "output_preview": str(result.get("output", ""))[:500],
+                    "output_preview": str(result.get("content", ""))[:500],
                 }
             )
 
