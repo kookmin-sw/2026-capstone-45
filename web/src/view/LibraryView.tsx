@@ -4,6 +4,7 @@ import { useState } from "react";
 import { DocumentCard } from "#root/component/DocumentCard.tsx";
 import { DocumentCardList } from "#root/component/DocumentCardList.tsx";
 import { EmptyDocumentList } from "#root/component/EmptyDocumentList.tsx";
+import { RenameDocumentModal } from "#root/component/RenameDocumentModal.tsx";
 import { useMutateCreateDocument } from "#root/query/createDocument";
 import {
 	type DocumentListEntry,
@@ -13,17 +14,21 @@ import {
 export const LibraryView = () => {
 	const { data } = useQueryDocumentList();
 	const { mutate } = useMutateCreateDocument();
-	const [_focusedDoc, setFocusedDoc] = useState<number | null>(null);
+	const [renameModalDoc, setRenameModalDoc] = useState<{
+		docId: number;
+		displayName: string;
+	} | null>(null);
 
 	const docs: DocumentListEntry[] = data?.docs ?? [];
 
 	const onRename = (docId: number) => {
-		setFocusedDoc(docId);
-		//TODO: Show modal
+		const doc = docs.find((d) => d.doc_id === docId);
+		if (doc) {
+			setRenameModalDoc({ docId, displayName: doc.display_name });
+		}
 	};
 
-	const onDelete = (docId: number) => {
-		setFocusedDoc(docId);
+	const onDelete = (_docId: number) => {
 		//TODO: Show modal
 	};
 
@@ -92,6 +97,14 @@ export const LibraryView = () => {
 					})}
 				</DocumentCardList>
 			</div>
+			{renameModalDoc && (
+				<RenameDocumentModal
+					docId={renameModalDoc.docId}
+					currentName={renameModalDoc.displayName}
+					visible={true}
+					onClose={() => setRenameModalDoc(null)}
+				/>
+			)}
 		</div>
 	);
 };

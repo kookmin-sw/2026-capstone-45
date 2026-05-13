@@ -96,6 +96,11 @@ async def is_all_documents_completed(db: AsyncSession, doc_ids: list[int]) -> bo
     return result.scalar_one() == 0
 
 
+async def rename_document(db: AsyncSession, doc_id: int, display_name: str):
+    doc = await db.get_one(Document, doc_id)
+    doc.display_name = display_name
+
+
 async def append_document_log(db: AsyncSession, doc_id: int, msg: str):
     doc = await db.get_one(Document, doc_id)
     doc.process_log += msg.strip() + "\n"

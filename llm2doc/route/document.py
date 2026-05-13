@@ -19,7 +19,7 @@ from llm2doc.dependency import WithDB, WithThreadPool
 from llm2doc.entity import DocumentStatus, File as FileRow, Document, DocumentImage
 from llm2doc.dto.document import DocumentListEntry
 from llm2doc.repository.artifact import clear_artifacts
-from llm2doc.repository.document import list_all_documents, load_document, load_document_image
+from llm2doc.repository.document import list_all_documents, load_document, load_document_image, rename_document
 
 
 router = APIRouter(prefix="/documents")
@@ -27,6 +27,10 @@ router = APIRouter(prefix="/documents")
 
 class ListDocumentResponse(BaseModel):
     docs: list[DocumentListEntry]
+
+
+class RenameDocumentRequest(BaseModel):
+    display_name: str
 
 
 @router.get("")
@@ -41,6 +45,12 @@ async def get_document_image(db: WithDB, doc_id: int, page: int):
     file = await load_document_image(db, doc, page)
 
     return FileResponse(f"file/{file.file_id}", media_type=file.mime_type)
+
+
+@router.put("/{doc_id}")
+async def rename_document_route(db: WithDB, doc_id: int, body: RenameDocumentRequest):
+    await rename_document(db, doc_id, body.display_name)
+    return {}
 
 
 @router.post("")
