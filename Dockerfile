@@ -11,6 +11,8 @@ FROM node:24-trixie AS build-web
 ARG CI=true
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
+ENV NODE_ENV="production"
+
 RUN corepack enable
 COPY ./web /web
 WORKDIR /web
