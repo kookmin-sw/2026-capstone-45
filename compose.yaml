@@ -4,8 +4,8 @@ services:
     ports:
       - "5000:80"
     volumes:
-      - /app/file
-      - /app_data
+      - app_file:/app/file
+      - app_data:/app_data
     shm_size: 64g
     restart: unless-stopped
     deploy:
@@ -49,3 +49,7 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
       start_period: 300s
+
+volumes:
+  app_file:
+  app_data:
