@@ -15,7 +15,7 @@ from llm2doc.route.font import router as font
 
 
 def create_db_engine():
-    engine = create_async_engine("sqlite+aiosqlite:///db.sqlite3", echo=True)
+    engine = create_async_engine("sqlite+aiosqlite:///file/db.sqlite3", echo=True)
 
     def prepare_connection(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
@@ -36,6 +36,9 @@ load_dotenv(override=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI | None = None):
+    os.makedirs("file/storage", exist_ok=True)
+    os.makedirs("file/chromadb", exist_ok=True)
+
     db = create_db_engine()
     thread_pool = ThreadPoolExecutor(max_workers=1)
 

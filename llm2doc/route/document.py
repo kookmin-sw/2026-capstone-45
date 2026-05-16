@@ -26,6 +26,7 @@ from llm2doc.repository.document import (
     rename_document,
     delete_document,
 )
+from llm2doc.repository.file import get_file_path
 
 
 router = APIRouter(prefix="/documents")
@@ -50,7 +51,7 @@ async def get_document_image(db: WithDB, doc_id: int, page: int):
     doc = await load_document(db, doc_id)
     file = await load_document_image(db, doc, page)
 
-    return FileResponse(f"file/{file.file_id}", media_type=file.mime_type)
+    return FileResponse(get_file_path(file.file_id), media_type=file.mime_type)
 
 
 @router.put("/{doc_id}")
@@ -93,9 +94,7 @@ async def create_document(file: Annotated[UploadFile, File()], db: WithDB):
     file_id = uuid.uuid4()
 
     def copy_file():
-        os.makedirs("file", exist_ok=True)
-
-        with open(f"file/{file_id}", "wb") as f:
+        with open(get_file_path(file_id), "wb") as f:
             shutil.copyfileobj(file.file, f)
 
     await asyncio.to_thread(copy_file)
@@ -147,7 +146,7 @@ async def create_document_worker(engine: Any, doc_id: int, file_id: uuid.UUID, f
     def serialize_pdf():
         img_ids: list[uuid.UUID] = []
 
-        pdf_file = fitz.Document(f"file/{file_id}", filetype="pdf")
+        pdf_file = fitz.Document(get_file_path(file_id), filetype="pdf")
         for i in range(len(pdf_file)):
             page = pdf_file[i]
 
@@ -155,7 +154,7 @@ async def create_document_worker(engine: Any, doc_id: int, file_id: uuid.UUID, f
             img_ids.append(img_id)
 
             img = page.get_pixmap(dpi=300)
-            img.save(f"file/{img_id}", output="PNG")
+            img.save(get_file_path(img_id), output="PNG")
 
         return img_ids
 

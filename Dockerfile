@@ -42,8 +42,5 @@ COPY ./data/font /app/data/font
 COPY --from=build-web /web/dist /app/web_static
 COPY --from=build-tessdata /app/tessdata /app/tessdata
 
-RUN mkdir /app_data && \
-    ln -s /app_data/db.sqlite3 /app/db.sqlite3
-
 EXPOSE 80
 CMD ["uv", "run", "fastapi", "run", "llm2doc/server.py", "--port", "80"]

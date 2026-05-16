@@ -25,7 +25,7 @@ def project_root() -> Path:
 
 
 def chat_log_root(chat_id: int) -> Path:
-    return project_root() / "debug_runs" / f"chat_{chat_id}"
+    return project_root() / "file" / "runs" / f"chat_{chat_id}"
 
 
 def _jsonable(value: Any) -> Any:

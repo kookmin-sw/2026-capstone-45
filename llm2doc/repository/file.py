@@ -1,3 +1,4 @@
+import os
 import asyncio
 import shutil
 
@@ -11,7 +12,7 @@ from llm2doc.entity import File
 
 
 def get_file_path(file_id: UUID) -> str:
-    return f"file/{file_id}"
+    return f"file/storage/{file_id}"
 
 
 @overload

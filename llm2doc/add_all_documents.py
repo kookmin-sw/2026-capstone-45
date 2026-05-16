@@ -8,6 +8,7 @@ from llm2doc.artifact.run import build_artifact
 from llm2doc.server import lifespan
 from llm2doc.entity import File as FileRow, Document
 from llm2doc.route.document import create_document_worker
+from llm2doc.repository.file import get_file_path
 from llm2doc.util import validate_type
 
 
@@ -32,7 +33,6 @@ async def add_all_documents(data_dir: str = "data", build_artifacts: bool = True
         return
 
     print(f"Found {len(pdf_files)} PDF file(s) in '{data_dir}'")
-    os.makedirs("file", exist_ok=True)
 
     async with lifespan(None) as context:
         engine = validate_type(context["db"], AsyncEngine)
@@ -44,8 +44,7 @@ async def add_all_documents(data_dir: str = "data", build_artifacts: bool = True
 
                 file_id = uuid.uuid4()
 
-                # Copy file to file/ directory
-                shutil.copy2(pdf_path, f"file/{file_id}")
+                shutil.copy2(pdf_path, get_file_path(file_id))
 
                 # Create File and Document rows
                 async with db.begin():

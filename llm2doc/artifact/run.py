@@ -20,13 +20,14 @@ from llm2doc.context.pipeline import PipelineContext
 from llm2doc.entity import Document
 from llm2doc.entity.document import DocumentStatus
 from llm2doc.repository.artifact import load_artifact, save_artifact
+from llm2doc.repository.file import get_file_path
 from llm2doc.util import join_thread_async
 
 
 PIPELINES: Sequence[Type[ArtifactPipeline]] = [
     OCRArtifactPipeline,
     StyleArtifactPipeline,
-    SemanticArtifactPipeline,
+    # SemanticArtifactPipeline,
 ]
 
 
@@ -192,7 +193,7 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
 
                 artifacts.append(dict())
                 existing_artifacts.append(set())
-                file_paths.append([f"file/{x}" for x in file_ids])
+                file_paths.append([get_file_path(x) for x in file_ids])
 
                 for pipeline in PIPELINES:
                     loaded = await load_artifact(db, doc_id, pipeline)

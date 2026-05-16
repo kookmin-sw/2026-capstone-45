@@ -670,7 +670,7 @@ class ToolSearchSourceDocument:
                 model_name=os.environ["OPENAI_EMBED_MODEL"],
             )
 
-            self.chroma = chromadb.RustClient(path="debug_chromadb_cache")
+            self.chroma = chromadb.RustClient(path="file/chromadb")
             try:
                 if self.force_rebuild and self.collection is None:
                     try:
