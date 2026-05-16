@@ -9,8 +9,7 @@ async def with_db(request: Request):
     db = validate_type(request.state.db, AsyncEngine)
 
     async with AsyncSession(db) as sess:
-        async with sess.begin():
-            yield sess
+        yield sess
 
 
 WithDB: TypeAlias = Annotated[AsyncSession, Depends(with_db)]

@@ -107,7 +107,9 @@ async def create_chat_route(db: WithDB, thread_pool: WithThreadPool, body: Creat
 
     display_name = body.query.strip()[:32].strip()
 
-    chat_id = await create_chat(db, display_name, target_doc=body.target_doc, source_docs=body.source_docs)
+    async with db.begin():
+        chat_id = await create_chat(db, display_name, target_doc=body.target_doc, source_docs=body.source_docs)
+
     tracer = GenerationTracer.for_chat(chat_id)
     tracer.update_summary(status="created", chat_id=chat_id, query=body.query)
 
@@ -210,10 +212,11 @@ async def get_chat_detail(db: WithDB, chat_id: int):
 
 @router.delete("/{chat_id}")
 async def delete_chat_route(db: WithDB, chat_id: int):
-    try:
-        await delete_chat(db, chat_id)
-    except IntegrityError:
-        raise HTTPException(400, "Cannot delete chat because some associated files are still in use.")
+    async with db.begin():
+        try:
+            await delete_chat(db, chat_id)
+        except IntegrityError:
+            raise HTTPException(400, "Cannot delete chat because some associated files are still in use.")
 
     return {}
 
@@ -226,7 +229,9 @@ async def rename_chat_route(db: WithDB, chat_id: int, body: RenameChatRequest):
     if len(display_name) > 64:
         raise HTTPException(400, "display name too long")
 
-    await rename_chat(db, chat_id, display_name)
+    async with db.begin():
+        await rename_chat(db, chat_id, display_name)
+
     return {}
 
 

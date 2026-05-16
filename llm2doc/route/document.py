@@ -56,13 +56,15 @@ async def get_document_image(db: WithDB, doc_id: int, page: int):
 
 @router.put("/{doc_id}")
 async def rename_document_route(db: WithDB, doc_id: int, body: RenameDocumentRequest):
-    await rename_document(db, doc_id, body.display_name)
+    async with db.begin():
+        await rename_document(db, doc_id, body.display_name)
     return {}
 
 
 @router.delete("/{doc_id}")
 async def delete_document_route(db: WithDB, doc_id: int):
-    await delete_document(db, doc_id)
+    async with db.begin():
+        await delete_document(db, doc_id)
     return {}
 
 
@@ -99,12 +101,14 @@ async def create_document(file: Annotated[UploadFile, File()], db: WithDB):
 
     await asyncio.to_thread(copy_file)
 
-    file_row = FileRow(file_id=file_id, mime_type=mime_type)
-    doc = Document(display_name=file.filename, original_file=file_row)
-    db.add(doc)
-    await db.flush()
+    async with db.begin():
+        file_row = FileRow(file_id=file_id, mime_type=mime_type)
+        doc = Document(display_name=file.filename, original_file=file_row)
+        db.add(doc)
 
-    doc_id = validate_type(await doc.awaitable_attrs.doc_id, int)
+        await db.flush()
+        doc_id = validate_type(await doc.awaitable_attrs.doc_id, int)
+
     asyncio.create_task(create_document_worker(db.bind, doc_id, file_id, file_type, True))
 
     return {"id": doc_id}
@@ -114,7 +118,8 @@ async def create_document(file: Annotated[UploadFile, File()], db: WithDB):
 async def rebuild_artifact(doc_id: int, db: WithDB):
     from llm2doc.artifact.run import build_artifact
 
-    await clear_artifacts(db, doc_id, None)
+    async with db.begin():
+        await clear_artifacts(db, doc_id, None)
 
     engine = validate_type(db.bind, AsyncEngine)
     await build_artifact(engine, [doc_id])
