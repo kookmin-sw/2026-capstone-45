@@ -13,12 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from llm2doc.artifact.base import ArtifactPipeline
 from llm2doc.artifact.ocr import OCRArtifactPipeline
-from llm2doc.artifact.style import StyleArtifactPipeline
-from llm2doc.artifact.semantic import SemanticArtifactPipeline
 from llm2doc.context.document import DocumentContext
 from llm2doc.context.pipeline import PipelineContext
 from llm2doc.entity import Document
 from llm2doc.entity.document import DocumentStatus
+from llm2doc.entity.document_log import DocumentLog
 from llm2doc.repository.artifact import load_artifact, save_artifact
 from llm2doc.repository.file import get_file_path
 from llm2doc.util import join_thread_async
@@ -26,8 +25,6 @@ from llm2doc.util import join_thread_async
 
 PIPELINES: Sequence[Type[ArtifactPipeline]] = [
     OCRArtifactPipeline,
-    StyleArtifactPipeline,
-    # SemanticArtifactPipeline,
 ]
 
 
@@ -50,7 +47,7 @@ async def _update_log_status(db: AsyncSession, doc_id: int, status: DocumentStat
     doc = await db.get_one(Document, doc_id)
 
     doc.process_status = status
-    doc.process_log += f"{log}\n"
+    db.add(DocumentLog(doc_id=doc_id, content_text=log))
 
 
 def _worker(pipeline_cls: Type[ArtifactPipeline], q: Queue[PipelineTask | None]):

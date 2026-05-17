@@ -25,6 +25,7 @@ from llm2doc.repository.document import (
     load_document_image,
     rename_document,
     delete_document,
+    append_document_log,
 )
 from llm2doc.repository.file import get_file_path
 
@@ -146,7 +147,7 @@ async def create_document_worker(engine: Any, doc_id: int, file_id: uuid.UUID, f
                 doc = await sess.get_one(Document, doc_id)
 
                 doc.process_status = status
-                doc.process_log += f"{log}\n"
+                await append_document_log(sess, doc_id, log.strip())
 
     def serialize_pdf():
         img_ids: list[uuid.UUID] = []

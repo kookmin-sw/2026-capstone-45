@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 
 from llm2doc.dto.document import DocumentListEntry
-from llm2doc.entity import Document, DocumentImage, File
+from llm2doc.entity import Document, DocumentImage, DocumentLog, File
 from llm2doc.entity.document import DocumentStatus
 
 
@@ -18,9 +18,9 @@ async def list_all_documents(db: AsyncSession) -> list[DocumentListEntry]:
         .label("pages_cnt")
     )
 
-    stmt = select(
-        Document.doc_id, Document.display_name, pages_cnt, Document.process_status, Document.process_log
-    ).order_by(Document.doc_id.desc())
+    stmt = select(Document.doc_id, Document.display_name, pages_cnt, Document.process_status).order_by(
+        Document.doc_id.desc()
+    )
 
     result: list[DocumentListEntry] = []
 
@@ -32,7 +32,6 @@ async def list_all_documents(db: AsyncSession) -> list[DocumentListEntry]:
                 display_name=row.display_name,
                 pages_cnt=row.pages_cnt,
                 process_status=row.process_status,
-                process_log=row.process_log,
             )
         )
 
@@ -102,8 +101,7 @@ async def rename_document(db: AsyncSession, doc_id: int, display_name: str):
 
 
 async def append_document_log(db: AsyncSession, doc_id: int, msg: str):
-    doc = await db.get_one(Document, doc_id)
-    doc.process_log += msg.strip() + "\n"
+    db.add(DocumentLog(doc_id=doc_id, content_text=msg.strip()))
 
 
 async def delete_document(db: AsyncSession, doc_id: int):

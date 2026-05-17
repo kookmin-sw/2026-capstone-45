@@ -24,7 +24,7 @@ class Document(Base):
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
     original_file_id: Mapped[UUID] = mapped_column(ForeignKey("file.file_id", onupdate="CASCADE"), nullable=False)
     process_status: Mapped[DocumentStatus] = mapped_column(Integer, nullable=False, default=DocumentStatus.PENDING)
-    process_log: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    text_content: Mapped[str] = mapped_column(Text, nullable=True)
 
     original_file: Mapped[File] = relationship("File", lazy="raise_on_sql")
     images: WriteOnlyMapped[DocumentImage] = relationship(

@@ -12,7 +12,6 @@ class DocumentListEntry(BaseModel):
     display_name: str
     pages_cnt: int
     process_status: DocumentStatus
-    process_log: str
 
     @field_serializer("process_status")
     def serialize_status(self, status: DocumentStatus, _info):
