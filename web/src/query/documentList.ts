@@ -12,7 +12,6 @@ export const DocumentListEntry = z.object({
 		z.literal("completed"),
 		z.literal("error"),
 	]),
-	process_log: z.string(),
 });
 
 export type DocumentListEntry = z.infer<typeof DocumentListEntry>;
