@@ -3,7 +3,6 @@ import re
 import tempfile
 from contextlib import contextmanager
 from typing import Callable, Mapping, Sequence, Any
-from threading import Lock
 
 from PIL import Image
 from pyhwpx import Hwp
@@ -12,7 +11,6 @@ from llm2doc.util import validate_type
 
 
 REGEX_TABLE_TMPL = re.compile(r"\{\{표:[^\n\r\}]+\}\}")
-HWP_COM_LOCK = Lock()
 
 
 class HwpFile:
@@ -29,19 +27,17 @@ class HwpFile:
         Open the specified HWP file.
         Yields a HwpFile instance.
         """
-        # CoInitializeEx 인자 뭘로 넣어서 초기화하는지 모르겠으니 일단 락을 넣자
-        with HWP_COM_LOCK:
-            hwp = Hwp()
-            abs_path = os.path.abspath(path)
-            if not hwp.open(abs_path):
-                hwp.quit()
-                raise FileNotFoundError(f"Failed to open HWP file: {abs_path}")
+        hwp = Hwp(visible=False)
+        abs_path = os.path.abspath(path)
+        if not hwp.open(abs_path):
+            hwp.quit()
+            raise FileNotFoundError(f"Failed to open HWP file: {abs_path}")
 
-            hwp_file = cls(hwp)
-            try:
-                yield hwp_file
-            finally:
-                hwp.quit()
+        hwp_file = cls(hwp)
+        try:
+            yield hwp_file
+        finally:
+            hwp.quit()
 
     def save_as(self, path: str):
         """
@@ -49,11 +45,7 @@ class HwpFile:
         """
         self.hwp.save_as(os.path.abspath(path))
 
-    def list_templates(self) -> list[str]:
-        """
-        Return list of `{{...}}` templates, and fields (누름틀) by name.
-        Name does not include `{{` or `}}`.
-        """
+    def _list_all_templates(self) -> list[str]:
         # 1. Get Fields (누름틀)
         field_list = self.hwp.get_field_list(number=0).split("\x02")
         fields = [f for f in field_list if f]
@@ -70,25 +62,23 @@ class HwpFile:
 
         templates = re.findall(r"\{\{(.*?)\}\}", all_text)
 
+        return fields + templates
+
+    def list_templates(self) -> list[str]:
+        """
+        Return list of `{{...}}` templates, and fields (누름틀) by name.
+        Name does not include `{{` or `}}`.
+        """
+
         # Return only normal templates not containing colon
-        return [x for x in set(fields + templates) if ":" not in x]
+        return list(set([x for x in self._list_all_templates() if ":" not in x]))
 
     def list_table_templates(self) -> Mapping[str, int]:
         """
         List table template names and their available column counts.
         """
-        self.hwp.init_scan()
-        try:
-            all_text = ""
-            while True:
-                state, text = self.hwp.get_text()
-                if state <= 1:
-                    break
-                all_text += text
-        finally:
-            self.hwp.release_scan()
 
-        templates = REGEX_TABLE_TMPL.findall(all_text)
+        templates = list(set([x for x in self._list_all_templates() if x.startswith("표:")]))
         results: dict[str, int] = {}
 
         for tmpl in templates:
