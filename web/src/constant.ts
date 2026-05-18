@@ -1,8 +1,15 @@
 import { notifications } from "@mantine/notifications";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryCache, QueryClient } from "@tanstack/react-query";
 import axios from "axios";
 
-export const queryClient = new QueryClient();
+export const queryClient = new QueryClient({
+	queryCache: new QueryCache({
+		onError: (error, query) => {
+			const key = JSON.stringify(query.queryKey);
+			console.error(`Query error on ${key}:\n`, error);
+		},
+	}),
+});
 
 export const axiosInstance = axios.create({
 	baseURL: "/api",
