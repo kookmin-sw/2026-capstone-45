@@ -103,7 +103,7 @@ async def create_document(file: Annotated[UploadFile, File()], db: WithDB):
     await asyncio.to_thread(copy_file)
 
     async with db.begin():
-        file_row = FileRow(file_id=file_id, mime_type=mime_type)
+        file_row = FileRow(file_id=file_id, mime_type=mime_type, extension=file_ext)
         doc = Document(display_name=file.filename, original_file=file_row)
         db.add(doc)
 
@@ -138,7 +138,7 @@ async def create_document_worker(engine: Any, doc_id: int, file_id: uuid.UUID, f
 
                 # FIXME: Fake MIME type
                 for i, img_id in enumerate(img_ids):
-                    file = FileRow(file_id=img_id, mime_type="image/png")
+                    file = FileRow(file_id=img_id, mime_type="image/png", extension="png")
                     doc.images.add(DocumentImage(file=file, display_order=i + 1))
 
     async def update_log_status(status: DocumentStatus, log: str):

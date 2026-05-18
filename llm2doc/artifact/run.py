@@ -11,6 +11,7 @@ from uuid import UUID
 from beartype import beartype
 from pydantic import BaseModel
 from PIL import Image
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from llm2doc.artifact.base import ArtifactPipeline
@@ -198,7 +199,7 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
 
         async with pipeline_ctx.with_db() as db:
             for i, doc_id in enumerate(doc_ids):
-                doc = await db.get_one(Document, doc_id)
+                doc = await db.get_one(Document, doc_id, options=[joinedload(Document.original_file)])
                 image_rows = (await db.execute(doc.images.select())).scalars().all()
                 file_ids = [x.file_id for x in image_rows]
 
@@ -206,7 +207,7 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
                 existing_artifacts.append(set())
                 file_paths.append([get_file_path(x) for x in file_ids])
                 original_file_ids.append(doc.original_file_id)
-                doc_exts.append(await doc.original_file.awaitable_attrs.mime_type)
+                doc_exts.append(doc.original_file.extension)
 
                 for pipeline in PIPELINES:
                     loaded = await load_artifact(db, doc_id, pipeline)

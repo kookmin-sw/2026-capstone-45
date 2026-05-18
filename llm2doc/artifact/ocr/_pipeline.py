@@ -30,6 +30,13 @@ class OCRArtifactPipeline(ArtifactPipeline[OCRArtifact]):
     def __init__(self, ctx: PipelineContext):
         super().__init__(ctx)
 
+        self.ocr_cache = None
+
+    @property
+    def ocr(self) -> PaddleOCRVL:
+        if self.ocr_cache is not None:
+            return self.ocr_cache
+
         vl_rec_backend = None
         vl_rec_server_url = os.getenv("PADDLEOCR_VL_REC_SERVER_URL")
 
@@ -37,13 +44,14 @@ class OCRArtifactPipeline(ArtifactPipeline[OCRArtifact]):
             logging.info(f"Using vLLM backend at {vl_rec_server_url}")
             vl_rec_backend = "vllm-server"
 
-        self.ocr = PaddleOCRVL(
+        self.ocr_cache = PaddleOCRVL(
             use_layout_detection=True,
             merge_layout_blocks=True,
             layout_nms=True,
             vl_rec_backend=vl_rec_backend,
             vl_rec_server_url=vl_rec_server_url,
         )
+        return self.ocr_cache
 
     def process(self, document: DocumentContext) -> OCRArtifact:
         if document.doc_ext not in IMAGE_EXTENSIONS and document.doc_ext != "pdf":
@@ -120,7 +128,7 @@ class OCRArtifactPipeline(ArtifactPipeline[OCRArtifact]):
 
     def __exit__(self, exc_type, exc, tb):
         # VRAM 정리
-        self.pipeline = None
+        self.ocr_cache = None
         self.free_vram()
 
     def free_vram(self):

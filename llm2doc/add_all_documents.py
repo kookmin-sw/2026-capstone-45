@@ -48,7 +48,7 @@ async def add_all_documents(data_dir: str = "data", build_artifacts: bool = True
 
                 # Create File and Document rows
                 async with db.begin():
-                    file_row = FileRow(file_id=file_id, mime_type="application/pdf")
+                    file_row = FileRow(file_id=file_id, mime_type="application/pdf", extension="pdf")
                     doc = Document(display_name=os.path.basename(pdf_path), original_file=file_row)
                     db.add(doc)
                     await db.flush()
