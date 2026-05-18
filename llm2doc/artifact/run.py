@@ -2,10 +2,12 @@ import asyncio
 import logging
 import os
 import threading
+
 from queue import Queue
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor
 from typing import NamedTuple, Sequence, Type, TypeVar
+from uuid import UUID
 from beartype import beartype
 from pydantic import BaseModel
 from PIL import Image
@@ -13,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from llm2doc.artifact.base import ArtifactPipeline
 from llm2doc.artifact.ocr import OCRArtifactPipeline
+from llm2doc.artifact.text import TextArtifactPipeline
 from llm2doc.context.document import DocumentContext
 from llm2doc.context.pipeline import PipelineContext
 from llm2doc.entity import Document
@@ -25,12 +28,15 @@ from llm2doc.util import join_thread_async
 
 PIPELINES: Sequence[Type[ArtifactPipeline]] = [
     OCRArtifactPipeline,
+    TextArtifactPipeline,
 ]
 
 
 class PipelineTask(NamedTuple):
     pipeline_ctx: PipelineContext
     doc_id: int
+    doc_ext: str
+    original_file_id: UUID
     images: Sequence[Image.Image]
     doc_artifacts: dict[str, BaseModel]
     events: dict[tuple[int, str], threading.Event]
@@ -83,6 +89,8 @@ def _worker(pipeline_cls: Type[ArtifactPipeline], q: Queue[PipelineTask | None])
                 doc = DocumentContext(
                     pipeline_ctx=task.pipeline_ctx,
                     doc_id=task.doc_id,
+                    doc_ext=task.doc_ext,
+                    original_file_id=task.original_file_id,
                     images=task.images,
                     artifacts=task.doc_artifacts,
                 )
@@ -119,6 +127,8 @@ def _ensure_daemon_threads():
 def _build_artifact_inner(
     pipeline_ctx: PipelineContext,
     doc_ids: Sequence[int],
+    doc_exts: Sequence[str],
+    file_ids: Sequence[UUID],
     file_paths: Sequence[Sequence[str]],
     artifacts: Sequence[dict[str, BaseModel]],
 ):
@@ -147,6 +157,8 @@ def _build_artifact_inner(
             task = PipelineTask(
                 pipeline_ctx=pipeline_ctx,
                 doc_id=doc_id,
+                doc_ext=doc_exts[i],
+                original_file_id=file_ids[i],
                 images=images[i],
                 doc_artifacts=artifacts[i],
                 events=events,
@@ -181,6 +193,8 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
         existing_artifacts: list[set[str]] = []
         artifacts: list[dict[str, BaseModel]] = []
         file_paths: list[list[str]] = []
+        original_file_ids: list[UUID] = []
+        doc_exts: list[str] = []
 
         async with pipeline_ctx.with_db() as db:
             for i, doc_id in enumerate(doc_ids):
@@ -191,6 +205,8 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
                 artifacts.append(dict())
                 existing_artifacts.append(set())
                 file_paths.append([get_file_path(x) for x in file_ids])
+                original_file_ids.append(doc.original_file_id)
+                doc_exts.append(await doc.original_file.awaitable_attrs.mime_type)
 
                 for pipeline in PIPELINES:
                     loaded = await load_artifact(db, doc_id, pipeline)
@@ -202,7 +218,7 @@ async def build_artifact(engine: AsyncEngine, doc_ids: Sequence[int]):
 
         def run_inner():
             try:
-                _build_artifact_inner(pipeline_ctx, doc_ids, file_paths, artifacts)
+                _build_artifact_inner(pipeline_ctx, doc_ids, doc_exts, original_file_ids, file_paths, artifacts)
             except BaseException as exc:
                 logging.exception("Failed to build artifacts")
                 build_errors.append(exc)

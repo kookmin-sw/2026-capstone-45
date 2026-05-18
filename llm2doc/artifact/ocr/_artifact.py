@@ -93,6 +93,7 @@ class OCRPage(BaseModel):
 
 class OCRArtifact(BaseModel):
     pages: list[OCRPage]
+    concatenated_markdown: str
 
     def to_sturctured_html(self, indent: int = 0, doc_id: str | None = None) -> str:
         result = []

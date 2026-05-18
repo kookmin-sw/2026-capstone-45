@@ -94,12 +94,14 @@ class HwpFile:
                 if self.hwp.is_cell():
                     # Count columns in row from here
                     addr = self.hwp.get_cell_addr()
+                    addr = validate_type(addr, str)
                     row_num = re.sub(r"[A-Z]+", "", addr)
 
                     pos = self.hwp.get_pos()
                     cols = 1
                     while self.hwp.TableRightCell():
                         new_addr = self.hwp.get_cell_addr()
+                        new_addr = validate_type(new_addr, str)
                         if re.sub(r"[A-Z]+", "", new_addr) == row_num:
                             cols += 1
                         else:

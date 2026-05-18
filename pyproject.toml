@@ -28,6 +28,9 @@ dependencies = [
     "pymupdf>=1.27.2.2",
     "aiosqlite>=0.22.1",
     "pyhwpx>=1.7.2",
+    "markitdown[docx,pdf,pptx]>=0.1.5",
+    "rhwp-python>=0.5.1",
+    "chardet>=7.4.3",
 ]
 
 [project.optional-dependencies]
