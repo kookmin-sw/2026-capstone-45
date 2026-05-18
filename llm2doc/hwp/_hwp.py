@@ -3,6 +3,7 @@ import re
 import tempfile
 from contextlib import contextmanager
 from typing import Callable, Mapping, Sequence, Any
+from threading import Lock
 
 from PIL import Image
 from pyhwpx import Hwp
@@ -11,6 +12,7 @@ from llm2doc.util import validate_type
 
 
 REGEX_TABLE_TMPL = re.compile(r"\{\{표:[^\n\r\}]+\}\}")
+HWP_COM_LOCK = Lock()
 
 
 class HwpFile:
@@ -27,17 +29,19 @@ class HwpFile:
         Open the specified HWP file.
         Yields a HwpFile instance.
         """
-        hwp = Hwp()
-        abs_path = os.path.abspath(path)
-        if not hwp.open(abs_path):
-            hwp.quit()
-            raise FileNotFoundError(f"Failed to open HWP file: {abs_path}")
+        # CoInitializeEx 인자 뭘로 넣어서 초기화하는지 모르겠으니 일단 락을 넣자
+        with HWP_COM_LOCK:
+            hwp = Hwp()
+            abs_path = os.path.abspath(path)
+            if not hwp.open(abs_path):
+                hwp.quit()
+                raise FileNotFoundError(f"Failed to open HWP file: {abs_path}")
 
-        hwp_file = cls(hwp)
-        try:
-            yield hwp_file
-        finally:
-            hwp.quit()
+            hwp_file = cls(hwp)
+            try:
+                yield hwp_file
+            finally:
+                hwp.quit()
 
     def save_as(self, path: str):
         """
