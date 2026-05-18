@@ -27,6 +27,7 @@ dependencies = [
     "fastapi[standard]>=0.136.0",
     "pymupdf>=1.27.2.2",
     "aiosqlite>=0.22.1",
+    "pyhwpx>=1.7.2",
 ]
 
 [project.optional-dependencies]
