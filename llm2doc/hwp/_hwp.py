@@ -2,7 +2,7 @@ import os
 import re
 import tempfile
 from contextlib import contextmanager
-from typing import Callable, Mapping, Sequence, Any
+from typing import Callable, Mapping, Sequence, Any, NewType
 
 from PIL import Image
 from pyhwpx import Hwp
@@ -10,30 +10,34 @@ from pyhwpx import Hwp
 from llm2doc.util import validate_type
 
 
-REGEX_TABLE_TMPL = re.compile(r"\{\{표:[^\n\r\}]+\}\}")
+REGEX_TABLE_TMPL = re.compile(r"\{\{표:.*?\}\}")
+REGEX_RICH_TAG = re.compile(r"(</?[buBU](?:\s+[^>]*)?>)")
+
+HCharShape = NewType("HCharShape", object)
 
 
 class HwpFile:
-    def __init__(self, hwp_obj: Hwp):
+    def __init__(self, hwp_obj: Hwp, debug: bool):
         """
         Do not call this directly. Use factory function instead.
         """
-        self.hwp = hwp_obj
+        self._hwp = hwp_obj
+        self._debug = debug
 
     @classmethod
     @contextmanager
-    def open(cls, path: str):
+    def open(cls, path: str, debug: bool = False):
         """
         Open the specified HWP file.
         Yields a HwpFile instance.
         """
-        hwp = Hwp(visible=False)
+        hwp = Hwp(visible=debug)
         abs_path = os.path.abspath(path)
         if not hwp.open(abs_path):
             hwp.quit()
             raise FileNotFoundError(f"Failed to open HWP file: {abs_path}")
 
-        hwp_file = cls(hwp)
+        hwp_file = cls(hwp, debug)
         try:
             yield hwp_file
         finally:
@@ -43,22 +47,22 @@ class HwpFile:
         """
         Save the document to the specified path.
         """
-        self.hwp.save_as(os.path.abspath(path))
+        self._hwp.save_as(os.path.abspath(path))
 
     def _list_all_templates(self) -> list[str]:
         # 1. Get Fields (누름틀)
-        field_list = self.hwp.get_field_list(number=0).split("\x02")
+        field_list = self._hwp.get_field_list(number=0).split("\x02")
         fields = [f for f in field_list if f]
 
         # 2. Get {{...}} templates from text
-        self.hwp.init_scan()
+        self._hwp.init_scan()
         all_text = ""
         while True:
-            state, text = self.hwp.get_text()
+            state, text = self._hwp.get_text()
             if state <= 1:
                 break
             all_text += text
-        self.hwp.release_scan()
+        self._hwp.release_scan()
 
         templates = re.findall(r"\{\{(.*?)\}\}", all_text)
 
@@ -83,25 +87,25 @@ class HwpFile:
 
         for tmpl in templates:
             template_str = "{{" + tmpl + "}}"
-            self.hwp.MoveDocBegin()
-            if self.hwp.find(template_str, direction="AllDoc"):
-                if self.hwp.is_cell():
+            self._hwp.MoveDocBegin()
+            if self._hwp.find(template_str, direction="AllDoc"):
+                if self._hwp.is_cell():
                     # Count columns in row from here
-                    addr = self.hwp.get_cell_addr()
+                    addr = self._hwp.get_cell_addr()
                     addr = validate_type(addr, str)
                     row_num = re.sub(r"[A-Z]+", "", addr)
 
-                    pos = self.hwp.get_pos()
+                    pos = self._hwp.get_pos()
                     cols = 1
-                    while self.hwp.TableRightCell():
-                        new_addr = self.hwp.get_cell_addr()
+                    while self._hwp.TableRightCell():
+                        new_addr = self._hwp.get_cell_addr()
                         new_addr = validate_type(new_addr, str)
                         if re.sub(r"[A-Z]+", "", new_addr) == row_num:
                             cols += 1
                         else:
                             break
                     results[tmpl] = cols
-                    self.hwp.set_pos(*pos)
+                    self._hwp.set_pos(*pos)
                 else:
                     results[tmpl] = 1
         return results
@@ -112,10 +116,18 @@ class HwpFile:
         `mapping` key is name returned by `list_templates`.
         `mapping` value is either text to be written, or custom funciton for rich text.
         """
+
+        existing_templates = set(self.list_templates())
+        new_templates = set(mapping.keys())
+        if existing_templates != new_templates:
+            missing = existing_templates - new_templates
+            surplus = new_templates - existing_templates
+            raise ValueError(f"Template mismatch. Missing: {missing}, Surplus: {surplus}")
+
         for name, value in mapping.items():
             # Try finding as field first
-            if self.hwp.field_exist(name):
-                field_list = self.hwp.get_field_list(number=1).split("\x02")
+            if self._hwp.field_exist(name):
+                field_list = self._hwp.get_field_list(number=1).split("\x02")
                 field_list = validate_type(field_list, list[str])
                 indices = []
                 for f in field_list:
@@ -128,24 +140,25 @@ class HwpFile:
 
                 indices.sort()
 
-                if not indices and self.hwp.field_exist(name):
+                if not indices and self._hwp.field_exist(name):
                     indices = [0]
 
                 if isinstance(value, str):
                     # put_field_text(name, value) replaces all of them by default
-                    self.hwp.put_field_text(name, value)
+                    self._hwp.put_field_text(name, value)
                 elif callable(value):
                     # For callable, we must visit each one.
                     for idx in indices:
-                        if self.hwp.move_to_field(name, idx=idx):
+                        if self._hwp.move_to_field(name, idx=idx):
                             value(self)
             else:
                 # Try finding as {{name}}
                 template_str = "{{" + name + "}}"
-                self.hwp.MoveDocBegin()
+                self._hwp.MoveDocBegin()
                 # Find all occurrences sequentially
                 count = 0
-                while self.hwp.find(template_str, direction="Forward"):
+                while self._hwp.find(template_str, direction="AllDoc"):
+                    self._hwp.Delete()
                     if isinstance(value, str):
                         self.act_write_text(value)
                     elif callable(value):
@@ -158,23 +171,34 @@ class HwpFile:
         """
         Replace table templates with sequences of strings.
         """
+
+        existing_templates = set(self.list_table_templates())
+        new_templates = set(mapping.keys())
+        if existing_templates != new_templates:
+            missing = existing_templates - new_templates
+            surplus = new_templates - existing_templates
+            raise ValueError(f"Template mismatch. Missing: {missing}, Surplus: {surplus}")
+
         for name, values in mapping.items():
             template_str = "{{" + name + "}}"
-            self.hwp.MoveDocBegin()
+            self._hwp.MoveDocBegin()
             count = 0
-            while self.hwp.find(template_str, direction="Forward"):
+            while self._hwp.find(template_str, direction="AllDoc"):
                 if not values:
                     break
 
+                assert self._hwp.is_cell()
+
                 # Replace first cell
-                self.act_write_text(values[0])
+                self._hwp.Delete()
+                self._hwp.insert_text(values[0])
 
                 # Fill subsequent cells
                 for val in values[1:]:
-                    if self.hwp.TableRightCell():
-                        self.hwp.TableCellBlock()
-                        self.hwp.Delete()
-                        self.hwp.insert_text(val)
+                    if self._hwp.TableRightCell():
+                        self._hwp.TableCellBlock()
+                        self._hwp.Delete()
+                        self._hwp.insert_text(val)
                     else:
                         break
 
@@ -182,17 +206,104 @@ class HwpFile:
                 if count > 1000:
                     raise RuntimeError("Failed to replace table template. Is template recursive?")
 
-    def act_write_text(self, text: str, bold: bool = False, underline: bool = False):
+    def get_charshape(self) -> Any:
+        """
+        Get character shape at current caret position.
+        """
+        return self._hwp.get_charshape()
+
+    def set_charshape(self, shape: HCharShape):
+        """
+        Set character shape at current caret position.
+        """
+        self._hwp.set_charshape(shape)
+
+    def move_to_template(self, name: str) -> bool:
+        """
+        Move caret to the first occurrence of the template.
+        Returns True if found, False otherwise.
+        """
+        # Try finding as field first
+        if self._hwp.field_exist(name):
+            if self._hwp.move_to_field(name):
+                return True
+
+        # Try finding as {{name}}
+        template_str = "{{" + name + "}}"
+        self._hwp.MoveDocBegin()
+        return self._hwp.find(template_str, direction="AllDoc")
+
+    def get_template_charshape(self, name: str) -> HCharShape:
+        """
+        Find a template and return its character shape.
+        Caret position is restored after sampling.
+        """
+        pos = self._hwp.get_pos()
+        try:
+            if self.move_to_template(name):
+                return self.get_charshape()
+            raise ValueError(f"Template '{name}' not found")
+        finally:
+            self._hwp.set_pos(*pos)
+
+    def act_write_text(self, text: str, shape: HCharShape | None = None):
         """
         Write text at current caret.
         """
-        if bold or underline:
-            self.hwp.set_font(Bold=bold, UnderlineType=1 if underline else 0)
 
-        self.hwp.insert_text(text)
+        old_shape = self.get_charshape()
+        try:
+            if shape is not None:
+                self.set_charshape(shape)
+            self._hwp.insert_text(text)
+        finally:
+            if shape is not None:
+                self.set_charshape(old_shape)
 
-        if bold or underline:
-            self.hwp.set_font(Bold=False, UnderlineType=0)
+    def act_write_text_rich(self, rich_text: str, shape: HCharShape | None = None):
+        """
+        Write rich text at current caret.
+        Supports `<b>` and `<u>` HTML tags.
+        """
+        parts = REGEX_RICH_TAG.split(rich_text)
+        bold_stack = 0
+        underline_stack = 0
+
+        old_shape = self.get_charshape()
+        if shape is not None:
+            self.set_charshape(shape)
+        else:
+            shape = old_shape
+
+        assert shape is not None
+
+        try:
+            for part in parts:
+                if not part:
+                    continue
+                low = part.lower()
+                if low.startswith("<b"):
+                    bold_stack += 1
+                elif low == "</b>":
+                    bold_stack = max(0, bold_stack - 1)
+                    if bold_stack == 0:
+                        self._hwp.set_font(Bold=False)
+                elif low.startswith("<u"):
+                    underline_stack += 1
+                elif low == "</u>":
+                    underline_stack = max(0, underline_stack - 1)
+                    if underline_stack == 0:
+                        self._hwp.set_font(UnderlineType=0)
+                else:
+                    self.set_charshape(shape)
+                    if bold_stack > 0:
+                        self._hwp.set_font(Bold=True)
+                    if underline_stack > 0:
+                        self._hwp.set_font(UnderlineType=1)
+
+                    self._hwp.insert_text(part)
+        finally:
+            self.set_charshape(old_shape)
 
     def act_write_table(self, data: Sequence[Sequence[str]]):
         """
@@ -205,13 +316,13 @@ class HwpFile:
         cols = len(data[0])
 
         # create_table moves caret to the first cell
-        self.hwp.create_table(rows=rows, cols=cols, header=False)
+        self._hwp.create_table(rows=rows, cols=cols, header=False)
 
         for r_idx, row in enumerate(data):
             for c_idx, cell_text in enumerate(row):
-                self.hwp.insert_text(str(cell_text))
+                self._hwp.insert_text(str(cell_text))
                 if not (r_idx == rows - 1 and c_idx == cols - 1):
-                    self.hwp.TableRightCell()
+                    self._hwp.TableRightCell()
 
     def act_write_image(self, image: Image.Image, treat_as_char: bool=False, fit: bool=False):
         """
@@ -219,4 +330,4 @@ class HwpFile:
         """
         with tempfile.NamedTemporaryFile(suffix=".png") as f:
             image.save(f.name)
-            self.hwp.insert_picture(f.name, sizeoption=3 if fit else 0, treat_as_char=treat_as_char)
+            self._hwp.insert_picture(f.name, sizeoption=3 if fit else 0, treat_as_char=treat_as_char)
